@@ -1,0 +1,100 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RolUsuario {
+  MUNICIPIO
+  COORDINADOR
+  ONG
+  AUDITOR
+
+  @@map("rol_usuario")
+}
+
+enum Gravedad {
+  BAJA
+  MEDIA
+  ALTA
+  CRITICA
+
+  @@map("gravedad")
+}
+
+enum TipoLote {
+  PERSONAL
+  RECURSO
+
+  @@map("tipo_lote")
+}
+
+model Usuario {
+  id           String       @id @default(uuid()) @db.Uuid
+  nombre       String       @db.VarChar(120)
+  email        String       @unique @db.VarChar(254)
+  rol          RolUsuario
+  organizacion String       @db.VarChar(150)
+  created_at   DateTime     @default(now()) @db.Timestamptz(3)
+  updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
+  emergencias  Emergencia[]
+  ofertas      Oferta[]
+
+  @@map("usuarios")
+}
+
+model Emergencia {
+  id                 String   @id @default(uuid()) @db.Uuid
+  creada_por_id      String   @db.Uuid
+  gravedad           Gravedad
+  zona               String   @db.VarChar(200)
+  descripcion        String   @db.Text
+  bonita_instance_id BigInt?  @unique @db.BigInt
+  created_at         DateTime @default(now()) @db.Timestamptz(3)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+  creada_por         Usuario  @relation(fields: [creada_por_id], references: [id], onDelete: Restrict)
+  lotes              Lote[]
+
+  @@index([creada_por_id])
+  @@map("emergencias")
+}
+
+model Lote {
+  id                 String     @id @default(uuid()) @db.Uuid
+  emergencia_id      String     @db.Uuid
+  tipo               TipoLote
+  descripcion        String     @db.Text
+  /// La migración SQL impone cantidad_requerida > 0.
+  cantidad_requerida Int
+  unidad             String     @db.VarChar(50)
+  created_at         DateTime   @default(now()) @db.Timestamptz(3)
+  updated_at         DateTime   @default(now()) @updatedAt @db.Timestamptz(3)
+  emergencia         Emergencia @relation(fields: [emergencia_id], references: [id], onDelete: Restrict)
+  ofertas            Oferta[]
+
+  @@index([emergencia_id])
+  @@map("lotes")
+}
+
+model Oferta {
+  id                String   @id @default(uuid()) @db.Uuid
+  lote_id           String   @db.Uuid
+  ong_usuario_id    String   @db.Uuid
+  /// La migración SQL impone cantidad_ofrecida > 0.
+  cantidad_ofrecida Int
+  observaciones     String?  @db.Text
+  created_at        DateTime @default(now()) @db.Timestamptz(3)
+  updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+  lote              Lote     @relation(fields: [lote_id], references: [id], onDelete: Restrict)
+  ong_usuario       Usuario  @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict)
+
+  @@index([lote_id])
+  @@index([ong_usuario_id])
+  @@map("ofertas")
+}
