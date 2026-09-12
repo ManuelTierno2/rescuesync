@@ -111,7 +111,7 @@
           <stepSummary xmi:type="expression:Expression" xmi:id="_lIAu46yREfGxAq-kOcKFjQ" name="" content="" returnTypeFixed="true"/>
         </elements>
       </elements>
-      <elements xmi:type="process:Lane" xmi:id="_nFnesKfpEfGZSb5q5b0p5g" name="Centro coordinador">
+      <elements xmi:type="process:Lane" xmi:id="_nFnesKfpEfGZSb5q5b0p5g" name="Centro coordinador" actor="_CUNXYK7DEfGSsY55kcG7Og">
         <elements xmi:type="process:Task" xmi:id="_91GHUKfpEfGZSb5q5b0p5g" name="Generar y publicar lotes" outgoing="_uNnrkK4dEfGSsY55kcG7Og" incoming="_-b1XMKfpEfGZSb5q5b0p5g _xj98UK4dEfGSsY55kcG7Og" overrideActorsOfTheLane="false">
           <dynamicLabel xmi:type="expression:Expression" xmi:id="_91HVcafpEfGZSb5q5b0p5g" name="" content="" returnTypeFixed="true"/>
           <dynamicDescription xmi:type="expression:Expression" xmi:id="_91HVcKfpEfGZSb5q5b0p5g" name="" content="" returnTypeFixed="true"/>
@@ -220,7 +220,7 @@
           <stepSummary xmi:type="expression:Expression" xmi:id="_HqbAo64fEfGSsY55kcG7Og" name="" content="" returnTypeFixed="true"/>
         </elements>
       </elements>
-      <elements xmi:type="process:Lane" xmi:id="_gVcV8KfqEfGZSb5q5b0p5g" name="ONG">
+      <elements xmi:type="process:Lane" xmi:id="_gVcV8KfqEfGZSb5q5b0p5g" name="ONG" actor="_DVdZAK7DEfGSsY55kcG7Og">
         <elements xmi:type="process:Task" xmi:id="_NravUKyWEfGxAq-kOcKFjQ" name="Visualizar notificacion" outgoing="_5rlOsKyTEfGxAq-kOcKFjQ" incoming="_5RA58KyQEfGxAq-kOcKFjQ" overrideActorsOfTheLane="false">
           <dynamicLabel xmi:type="expression:Expression" xmi:id="_iW5uoayQEfGxAq-kOcKFjQ" name="" content="" returnTypeFixed="true"/>
           <dynamicDescription xmi:type="expression:Expression" xmi:id="_iW5uoKyQEfGxAq-kOcKFjQ" name="" content="" returnTypeFixed="true"/>
@@ -269,6 +269,9 @@
       </elements>
       <data xmi:type="process:Data" xmi:id="_rsDataLotesCubiertos" name="lotesCubiertos" dataType="_r-AG6KflEfGZSb5q5b0p5g">
         <defaultValue xmi:type="expression:Expression" xmi:id="_rsDefaultLotes" name="false" content="false" returnType="java.lang.Boolean" returnTypeFixed="true"/>
+      </data>
+      <data xmi:type="process:Data" xmi:id="_XbgEwK7EEfGSsY55kcG7Og" name="cursoAccion" dataType="_r-AG7aflEfGZSb5q5b0p5g">
+        <defaultValue xmi:type="expression:Expression" xmi:id="_XbgEwa7EEfGSsY55kcG7Og" content=""/>
       </data>
       <formMapping xmi:type="process:FormMapping" xmi:id="_r-AG0KflEfGZSb5q5b0p5g">
         <targetForm xmi:type="expression:Expression" xmi:id="_r-AG0aflEfGZSb5q5b0p5g" name="" content="" type="FORM_REFERENCE_TYPE" returnTypeFixed="true"/>
@@ -358,7 +361,7 @@
       </connections>
       <connections xmi:type="process:SequenceFlow" xmi:id="_p4rroK4dEfGSsY55kcG7Og" name="Reabrir convocatoria" target="_ODwuUKfqEfGZSb5q5b0p5g" source="_brleUK4eEfGSsY55kcG7Og">
         <decisionTable xmi:type="decision:DecisionTable" xmi:id="_p4sSsK4dEfGSsY55kcG7Og"/>
-        <condition xmi:type="expression:Expression" xmi:id="_p4sSsa4dEfGSsY55kcG7Og" name="" content="" returnType="java.lang.Boolean" returnTypeFixed="true"/>
+        <condition xmi:type="expression:Expression" xmi:id="_p4sSsa4dEfGSsY55kcG7Og" name="REABRIR" content="REABRIR" returnType="java.lang.Boolean" returnTypeFixed="true"/>
       </connections>
       <connections xmi:type="process:SequenceFlow" xmi:id="_uNnrkK4dEfGSsY55kcG7Og" target="_HqbAoK4fEfGSsY55kcG7Og" source="_91GHUKfpEfGZSb5q5b0p5g">
         <decisionTable xmi:type="decision:DecisionTable" xmi:id="_uNnrka4dEfGSsY55kcG7Og"/>
@@ -366,11 +369,11 @@
       </connections>
       <connections xmi:type="process:SequenceFlow" xmi:id="_xj98UK4dEfGSsY55kcG7Og" name="Reformular lotes" target="_91GHUKfpEfGZSb5q5b0p5g" source="_brleUK4eEfGSsY55kcG7Og">
         <decisionTable xmi:type="decision:DecisionTable" xmi:id="_xj-jYK4dEfGSsY55kcG7Og"/>
-        <condition xmi:type="expression:Expression" xmi:id="_xj-jYa4dEfGSsY55kcG7Og" name="" content="" returnType="java.lang.Boolean" returnTypeFixed="true"/>
+        <condition xmi:type="expression:Expression" xmi:id="_xj-jYa4dEfGSsY55kcG7Og" name="REFORMULAR" content="REFORMULAR" returnType="java.lang.Boolean" returnTypeFixed="true"/>
       </connections>
       <connections xmi:type="process:SequenceFlow" xmi:id="_3cvtkK4dEfGSsY55kcG7Og" name="Continuar con cobertura parcial" target="__CbgUKftEfGZSb5q5b0p5g" source="_brleUK4eEfGSsY55kcG7Og">
         <decisionTable xmi:type="decision:DecisionTable" xmi:id="_3cwUoK4dEfGSsY55kcG7Og"/>
-        <condition xmi:type="expression:Expression" xmi:id="_3cwUoa4dEfGSsY55kcG7Og" name="" content="" returnType="java.lang.Boolean" returnTypeFixed="true"/>
+        <condition xmi:type="expression:Expression" xmi:id="_3cwUoa4dEfGSsY55kcG7Og" name="PARCIAL" content="PARCIAL" returnType="java.lang.Boolean" returnTypeFixed="true"/>
       </connections>
       <connections xmi:type="process:SequenceFlow" xmi:id="_hVefAK4eEfGSsY55kcG7Og" name="decidir" target="_brleUK4eEfGSsY55kcG7Og" source="_HOasAK4dEfGSsY55kcG7Og">
         <decisionTable xmi:type="decision:DecisionTable" xmi:id="_hVfGEK4eEfGSsY55kcG7Og"/>
@@ -390,6 +393,8 @@
       </connections>
       <actors xmi:type="process:Actor" xmi:id="_r-AG16flEfGZSb5q5b0p5g" documentation="This is an example of actor that is mapped to any ACME users" name="Employee actor" initiator="true"/>
       <actors xmi:type="process:Actor" xmi:id="_XDEoIKfpEfGZSb5q5b0p5g" name="Municipio"/>
+      <actors xmi:type="process:Actor" xmi:id="_CUNXYK7DEfGSsY55kcG7Og" name="CentroCoordinador"/>
+      <actors xmi:type="process:Actor" xmi:id="_DVdZAK7DEfGSsY55kcG7Og" name="ONG"/>
       <contract xmi:type="process:Contract" xmi:id="_r-AG2KflEfGZSb5q5b0p5g"/>
       <searchIndexes xmi:type="process:SearchIndex" xmi:id="_r-AG2aflEfGZSb5q5b0p5g">
         <name xmi:type="expression:Expression" xmi:id="_r-AG2qflEfGZSb5q5b0p5g" content="" returnTypeFixed="true"/>

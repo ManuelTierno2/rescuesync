@@ -1,8 +1,9 @@
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { createApp } from './app.js';
-import { readEnv } from './config/env.js';
+import { readEnv, EnvError } from './config/env.js';
 import { createPrismaClient } from './database/prisma.js';
+import { createBonitaService } from './integrations/bonita/bonita.service.js';
 
 async function main() {
   const env = readEnv();
@@ -11,7 +12,7 @@ async function main() {
   try {
     await prisma.$connect();
     await prisma.$queryRaw`SELECT 1`;
-    const server = createServer(createApp(prisma));
+    const server = createServer(createApp(prisma, createBonitaService(env.bonita)));
     server.listen(env.PORT);
     await once(server, 'listening');
     console.log(`RescueSync disponible en http://localhost:${env.PORT}`);
@@ -36,7 +37,8 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  console.error('No se pudo iniciar RescueSync. Revisar las variables de entorno, PostgreSQL, las migraciones y el puerto.');
+main().catch((error: unknown) => {
+  console.error(error instanceof EnvError ? error.message
+    : 'No se pudo iniciar RescueSync. Revisar las variables de entorno, PostgreSQL, las migraciones y el puerto.');
   process.exitCode = 1;
 });
