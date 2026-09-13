@@ -22,14 +22,14 @@ export function LoteForm({ emergenciaId, onSaved }: { emergenciaId: string; onSa
         setUnidad('');
         onSaved();
       },
-      'Lote creado y disponible para las ONG.',
+      'Lote guardado. Publique la convocatoria para recibir ofertas.',
     );
   }
   return (
     <section className="card form-panel">
       <p className="eyebrow">Centro Coordinador</p>
       <h2>Crear lote</h2>
-      <p className="muted">Al guardar, el lote queda visible para recibir ofertas.</p>
+      <p className="muted">Guarde los lotes y luego confirme Publicar convocatoria.</p>
       <form onSubmit={save}>
         <ErrorMessage error={state.error} />
         <Success message={state.success} />

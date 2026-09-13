@@ -5,11 +5,18 @@ import { useDevUser } from '../user-context';
 import { ErrorMessage, Loading, Success, formatDate } from '../ui';
 import { LoteForm } from '../components/LoteForm';
 import { LoteCard } from '../components/LoteCard';
+import { WorkflowPanel } from '../components/WorkflowPanel';
+import { useWorkflow } from '../workflow';
 
 function Detail({ id }: { id: string }) {
   const { user } = useDevUser();
   const emergency = useApiData<Emergencia>('/emergencias/' + id);
   const lotes = useApiData<Lote[]>('/emergencias/' + id + '/lotes');
+  const workflow = useWorkflow(id);
+  const canCreate = user?.rol === 'COORDINADOR' && workflow.data && !workflow.data.round?.publicada_at && !workflow.data.localClosed && !workflow.error;
+  const canOffer = !!workflow.data?.windows.some(w => !w.cerrada_at && new Date(w.vence_at).getTime() > Date.now())
+    && !workflow.data?.round?.seleccionada_at && !workflow.data?.localClosed && !workflow.error;
+  const refreshAll = () => { emergency.refresh(); lotes.refresh(); workflow.refresh(); };
   const location = useLocation();
   const feedback = location.state as { warnings?: Warning[]; created?: boolean } | null;
   const data = emergency.data;
@@ -56,11 +63,12 @@ function Detail({ id }: { id: string }) {
               </div>
             </dl>
           </section>
+          <WorkflowPanel id={id} query={workflow} onChanged={refreshAll} />
           <div className="section-heading">
             <h2>Lotes de necesidades</h2>
             <p className="muted">Recursos y personas solicitados para esta emergencia.</p>
           </div>
-          <div className={user?.rol === 'COORDINADOR' ? 'detail-layout' : ''}>
+          <div className={canCreate ? 'detail-layout' : ''}>
             <div>
               <ErrorMessage error={lotes.error} retry={lotes.refresh} />
               {lotes.loading && <Loading />}
@@ -71,13 +79,13 @@ function Detail({ id }: { id: string }) {
                 </div>
               )}
               <div className="lotes-list">
-                {lotes.data?.map((lote) => (
-                  <LoteCard key={lote.id} lote={lote} />
+                {lotes.data?.filter(l => l.ronda_id === workflow.data?.round?.id).map((lote) => (
+                  <LoteCard key={lote.id} lote={lote} canOffer={canOffer} onOfferSaved={workflow.refresh} />
                 ))}
               </div>
             </div>
-            {user?.rol === 'COORDINADOR' && (
-              <LoteForm key={user.id} emergenciaId={id} onSaved={lotes.refresh} />
+            {canCreate && (
+              <LoteForm key={user.id} emergenciaId={id} onSaved={() => { lotes.refresh(); workflow.refresh(); }} />
             )}
           </div>
         </>

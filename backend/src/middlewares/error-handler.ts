@@ -1,11 +1,13 @@
 import type { ErrorRequestHandler } from 'express';
 import { Prisma } from '../generated/prisma/client.js';
 import { AppError } from '../errors/app-error.js';
+import { BonitaError } from '../integrations/bonita/bonita.client.js';
 
 const unavailableCodes = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2037']);
 
 function normalizeError(error: unknown): AppError {
   if (error instanceof AppError) return error;
+  if (error instanceof BonitaError) return new AppError(/TASK_|CONTRACT_/.test(error.code) ? 409 : 502, error.code, error.message);
 
   if (error instanceof URIError) {
     return new AppError(400, 'INVALID_URL', 'La URL contiene una codificación inválida.');

@@ -15,6 +15,7 @@
     "build": "npm run generate && tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "bonita:inspect": "tsx scripts/inspect-bonita.ts",
     "test": "tsx --test --test-concurrency=1 tests/*.test.ts"
   },
   "dependencies": {

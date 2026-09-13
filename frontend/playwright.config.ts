@@ -8,7 +8,7 @@ export default defineConfig({
   workers: 1,
   timeout: 30000,
   retries: 0,
-  use: { baseURL: 'http://localhost:5173', browserName: 'chromium', headless: true },
+  use: { baseURL: 'http://localhost:5174', browserName: 'chromium', headless: true },
   webServer: [
     {
       command: 'node --import ./node_modules/tsx/dist/loader.mjs tests/helpers/browser-server.ts',
@@ -17,8 +17,8 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: 'npm run dev -- --host localhost',
-      url: 'http://localhost:5173',
+      command: 'npm run dev -- --host localhost --port 5174',
+      url: 'http://localhost:5174',
       env: { VITE_API_URL: 'http://127.0.0.1:3001/api' },
       reuseExistingServer: false,
     },

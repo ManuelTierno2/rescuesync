@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { setApiUserId } from './api';
 import type { Usuario } from './api';
 import { useApiData } from './hooks';
 import { ErrorMessage, Loading } from './ui';
@@ -17,7 +18,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   });
   const user = users.data?.find((item) => item.id === selectedId);
+  useEffect(() => { setApiUserId(user?.id ?? ''); }, [user?.id]);
   function select(id: string) {
+    setApiUserId(id);
     setSelectedId(id);
     try {
       id ? localStorage.setItem(storageKey, id) : localStorage.removeItem(storageKey);

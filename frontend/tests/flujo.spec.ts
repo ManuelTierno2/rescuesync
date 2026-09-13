@@ -49,6 +49,10 @@ test('flujo completo por roles y persistencia después de refrescar', async ({ p
     await expect(page.getByRole('article', { name: descripcion })).toBeVisible();
   }
 
+  await page.getByRole('button', { name: 'Publicar convocatoria', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar acción', exact: true }).click();
+  await expect(page.getByText('Ronda 1 · Publicada', { exact: true })).toBeVisible();
+
   await page.getByLabel('Usuario de desarrollo').selectOption(ong);
   await expect(page.getByRole('heading', { name: 'Crear lote', exact: true })).toHaveCount(0);
   for (const [descripcion, cantidad] of [
@@ -66,6 +70,35 @@ test('flujo completo por roles y persistencia después de refrescar', async ({ p
   await expect(page.getByLabel('Usuario de desarrollo')).toHaveValue(ong);
   await expect(page.getByText('400 raciones', { exact: true })).toBeVisible();
   await expect(page.getByText('2 personas', { exact: true })).toBeVisible();
+
+  await page.getByLabel('Usuario de desarrollo').selectOption(municipio);
+  await page.getByRole('button', { name: 'Continuar a selección', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar acción', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Acciones del operativo' }).getByRole('status')).toContainText('Acción confirmada.');
+  await page.getByLabel('ONG A: 400 raciones', { exact: false }).check();
+  await page.getByLabel('ONG A: 2 personas', { exact: false }).check();
+  await page.getByRole('button', { name: 'Confirmar adjudicación', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar acción', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Acciones del operativo' }).getByRole('status')).toContainText('Acción confirmada.');
+  await page.getByLabel('Usuario de desarrollo').selectOption(ong);
+  await expect(page.getByText('Tiene ofertas adjudicadas en esta ronda.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar lectura', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar acción', exact: true }).click();
+  await expect(page.getByText('Lectura confirmada.', { exact: true })).toBeVisible();
+  await page.getByLabel('Usuario de desarrollo').selectOption(coordinador);
+  await expect(page.getByRole('region', { name: 'Monitoreo', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cerrar operativo', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Finalizar monitoreo / continuar cierre', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar acción', exact: true }).click();
+  await expect(page.getByText('Monitoreo finalizado.', { exact: true })).toBeVisible();
+  await page.getByLabel('Usuario de desarrollo').selectOption(ong);
+  await page.getByRole('button', { name: 'Marcar actividad finalizada', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar acción', exact: true }).click();
+  await expect(page.getByText('Actividad finalizada.', { exact: true })).toBeVisible();
+  await page.getByLabel('Usuario de desarrollo').selectOption(coordinador);
+  await page.getByRole('button', { name: 'Cerrar operativo', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirmar acción', exact: true }).click();
+  await expect(page.getByText('Ronda 1 · Cierre local confirmado', { exact: true })).toBeVisible();
 
   await page.getByLabel('Usuario de desarrollo').selectOption(auditor);
   await expect(page.getByRole('button', { name: 'Enviar oferta' })).toHaveCount(0);

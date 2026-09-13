@@ -6,11 +6,12 @@ export function useApiData<T>(path: string) {
   const [error, setError] = useState<unknown>();
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  const previousPath = useRef(path);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
-    setData(undefined);
+    if (previousPath.current !== path) { setData(undefined); previousPath.current = path; }
     void api<T>(path, { signal: controller.signal })
       .then((result) => {
         if (!controller.signal.aborted) setData(result.data);

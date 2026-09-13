@@ -23,6 +23,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: databaseUrlSchema,
   BONITA_ENABLED: z.enum(['true', 'false']).default('false'),
+  BONITA_WORKFLOW_PROCESS_IDS: z.string().default('').refine(v => !v || v.split(',').every(id => isBonitaId(id.trim()))),
+  BONITA_CALLBACK_SECRET: z.string().default('').refine(v => !v || v.length >= 32),
+  OFERTAS_VALIDACION_MODE: z.enum(['PENDIENTE', 'DESARROLLO']).default('PENDIENTE'),
 });
 
 const bonitaSchema = z.object({

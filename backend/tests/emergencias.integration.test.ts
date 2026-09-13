@@ -12,7 +12,7 @@ import { PrismaClient } from '../src/generated/prisma/client.js';
 import { createApp } from '../src/app.js';
 import { testDatabaseUrl } from './helpers/test-database.js';
 import { createPrismaClient } from '../src/database/prisma.js';
-import { MUNICIPIO_DEMO_ID, ONG_B_DEMO_ID, seedMunicipio, seedUsuarios } from '../prisma/seed.js';
+import { MUNICIPIO_DEMO_ID, COORDINADOR_DEMO_ID, ONG_B_DEMO_ID, seedMunicipio, seedUsuarios } from '../prisma/seed.js';
 import { createBonitaService } from '../src/integrations/bonita/bonita.service.js';
 import { bonitaServer } from './helpers/bonita-server.js';
 
@@ -93,7 +93,7 @@ describe('Emergencias y persistencia PostgreSQL', () => {
     assert.ok(!Number.isNaN(Date.parse(data.created_at)));
     assert.ok(!Number.isNaN(Date.parse(data.updated_at)));
     assert.deepEqual(Object.keys(data).sort(), [
-      'id', 'creada_por_id', 'gravedad', 'zona', 'descripcion', 'bonita_instance_id', 'created_at', 'updated_at',
+      'id', 'creada_por_id', 'gravedad', 'zona', 'descripcion', 'bonita_instance_id', 'cerrada_at', 'created_at', 'updated_at',
     ].sort());
     const saved = await prisma.emergencia.findUniqueOrThrow({ where: { id: data.id } });
     assert.equal(saved.descripcion, validBody.descripcion);
@@ -238,7 +238,7 @@ describe('Emergencias y persistencia PostgreSQL', () => {
 
 describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
   async function lote(emergenciaId: string, changes = {}) {
-    const response = await request(app).post('/api/emergencias/' + emergenciaId + '/lotes').send({
+    const response = await request(app).post('/api/emergencias/' + emergenciaId + '/lotes').set('X-Dev-User-Id', COORDINADOR_DEMO_ID).send({
       tipo: 'RECURSO', descripcion: 'Raciones de alimento', cantidad_requerida: 1000, unidad: 'raciones', ...changes,
     }).expect(201);
     owned.lotes.push(response.body.data.id);
@@ -267,12 +267,13 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     assert.deepEqual((await request(app).get('/api/emergencias/' + id + '/lotes').expect(200)).body, { data: [] });
     const raciones = await lote(id);
     const personal = await lote(id, { tipo: 'PERSONAL', descripcion: 'Paramédicos', cantidad_requerida: 5, unidad: 'personas' });
+    await request(app).post('/api/emergencias/' + id + '/acciones/publicar').set('X-Dev-User-Id', COORDINADOR_DEMO_ID).send({ accionId: randomUUID() }).expect(200);
     assert.deepEqual((await request(app).get('/api/lotes/' + raciones.id + '/ofertas').expect(200)).body, { data: [] });
     for (const [loteId, ong, cantidad] of [
       [raciones.id, otrosRoles.get('ONG')!, 400], [raciones.id, ONG_B_DEMO_ID, 300],
       [raciones.id, ONG_B_DEMO_ID, 1400], [personal.id, otrosRoles.get('ONG')!, 2],
     ] as const) {
-      const response = await request(app).post('/api/lotes/' + loteId + '/ofertas').send({
+      const response = await request(app).post('/api/lotes/' + loteId + '/ofertas').set('X-Dev-User-Id', ong).send({
         ong_usuario_id: ong, cantidad_ofrecida: cantidad, observaciones: '  Entrega inmediata  ',
       }).expect(201);
       owned.ofertas.push(response.body.data.id);
@@ -290,8 +291,9 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     const item = await lote(created.body.data.id, { descripcion: ' ' + 'd'.repeat(5000) + ' ', unidad: ' ' + 'u'.repeat(50) + ' ', cantidad_requerida: 2147483647 });
     assert.equal(item.descripcion.length, 5000);
     assert.equal(item.unidad.length, 50);
+    await request(app).post('/api/emergencias/' + created.body.data.id + '/acciones/publicar').set('X-Dev-User-Id', COORDINADOR_DEMO_ID).send({ accionId: randomUUID() }).expect(200);
     for (const observaciones of [undefined, null, '  ', 'o'.repeat(5000)]) {
-      const response = await request(app).post('/api/lotes/' + item.id + '/ofertas').send({
+      const response = await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', otrosRoles.get('ONG')!).send({
         ong_usuario_id: otrosRoles.get('ONG'), cantidad_ofrecida: 2147483647, observaciones,
       }).expect(201);
       owned.ofertas.push(response.body.data.id);
@@ -307,7 +309,7 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     const ofertasCount = await prisma.oferta.count();
     for (const cantidad of [0, -1, 1.5, 2147483648, '2', null]) {
       assertError(await request(app).post('/api/emergencias/' + created.body.data.id + '/lotes').send({ ...loteBody, cantidad_requerida: cantidad }), 400, 'VALIDATION_ERROR');
-      assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').send({ ...ofertaBody, cantidad_ofrecida: cantidad }), 400, 'VALIDATION_ERROR');
+      assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', otrosRoles.get('ONG')!).send({ ...ofertaBody, cantidad_ofrecida: cantidad }), 400, 'VALIDATION_ERROR');
     }
     for (const change of [
       { tipo: 'OTRO' }, { descripcion: ' ' }, { descripcion: 'd'.repeat(5001) }, { unidad: ' ' },
@@ -316,7 +318,7 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     for (const change of [
       { ong_usuario_id: 'invalid' }, { observaciones: 42 }, { observaciones: 'o'.repeat(5001) },
       { lote_id: randomUUID() }, { id: randomUUID() }, { updated_at: 'now' },
-    ]) assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').send({ ...ofertaBody, ...change }), 400, 'VALIDATION_ERROR');
+    ]) assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', otrosRoles.get('ONG')!).send({ ...ofertaBody, ...change }), 400, 'VALIDATION_ERROR');
     assert.equal(await prisma.lote.count(), lotesCount);
     assert.equal(await prisma.oferta.count(), ofertasCount);
   });
@@ -327,15 +329,15 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     const loteBody = { tipo: 'RECURSO', descripcion: 'Alimentos', cantidad_requerida: 1, unidad: 'raciones' };
     const ofertaBody = { ong_usuario_id: otrosRoles.get('ONG'), cantidad_ofrecida: 1 };
     assertError(await request(app).get('/api/emergencias/' + unknown + '/lotes'), 404, 'EMERGENCIA_NOT_FOUND');
-    assertError(await request(app).post('/api/emergencias/' + unknown + '/lotes').send(loteBody), 404, 'EMERGENCIA_NOT_FOUND');
+    assertError(await request(app).post('/api/emergencias/' + unknown + '/lotes').set('X-Dev-User-Id', COORDINADOR_DEMO_ID).send(loteBody), 404, 'EMERGENCIA_NOT_FOUND');
     assertError(await request(app).get('/api/lotes/' + unknown + '/ofertas'), 404, 'LOTE_NOT_FOUND');
-    assertError(await request(app).post('/api/lotes/' + unknown + '/ofertas').send(ofertaBody), 404, 'LOTE_NOT_FOUND');
+    assertError(await request(app).post('/api/lotes/' + unknown + '/ofertas').set('X-Dev-User-Id', otrosRoles.get('ONG')!).send(ofertaBody), 404, 'LOTE_NOT_FOUND');
     for (const path of ['/api/emergencias/invalid/lotes', '/api/lotes/invalid/ofertas']) {
       assertError(await request(app).get(path), 400, 'VALIDATION_ERROR');
       assertError(await request(app).post(path).send({}), 400, 'VALIDATION_ERROR');
     }
     for (const ong_usuario_id of [unknown, MUNICIPIO_DEMO_ID, otrosRoles.get('COORDINADOR'), otrosRoles.get('AUDITOR')]) {
-      assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').send({ ...ofertaBody, ong_usuario_id }), 422, 'INVALID_ONG');
+      assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', ong_usuario_id!).send({ ...ofertaBody, ong_usuario_id }), 422, 'INVALID_ONG');
     }
     assert.equal(await prisma.oferta.count({ where: { lote_id: item.id } }), 0);
   });

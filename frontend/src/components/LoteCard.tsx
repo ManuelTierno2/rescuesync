@@ -67,7 +67,7 @@ function OfertaForm({
     </form>
   );
 }
-export function LoteCard({ lote }: { lote: Lote }) {
+export function LoteCard({ lote, canOffer = false, onOfferSaved }: { lote: Lote; canOffer?: boolean; onOfferSaved?: () => void }) {
   const { user } = useDevUser();
   const query = useApiData<Oferta[]>('/lotes/' + lote.id + '/ofertas');
   return (
@@ -100,8 +100,8 @@ export function LoteCard({ lote }: { lote: Lote }) {
           ))}
         </ul>
       </div>
-      {user?.rol === 'ONG' && (
-        <OfertaForm key={user.id} lote={lote} userId={user.id} onSaved={query.refresh} />
+      {user?.rol === 'ONG' && canOffer && (
+        <OfertaForm key={user.id} lote={lote} userId={user.id} onSaved={() => { query.refresh(); onOfferSaved?.(); }} />
       )}
     </article>
   );

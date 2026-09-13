@@ -45,6 +45,8 @@ model Usuario {
   updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
   emergencias  Emergencia[]
   ofertas      Oferta[]
+  adjudicaciones Adjudicacion[]
+  participaciones ParticipacionOng[]
 
   @@map("usuarios")
 }
@@ -60,6 +62,9 @@ model Emergencia {
   updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz(3)
   creada_por         Usuario  @relation(fields: [creada_por_id], references: [id], onDelete: Restrict)
   lotes              Lote[]
+  rondas             Ronda[]
+  acciones           AccionWorkflow[]
+  cerrada_at         DateTime? @db.Timestamptz(3)
 
   @@index([creada_por_id])
   @@map("emergencias")
@@ -77,6 +82,8 @@ model Lote {
   updated_at         DateTime   @default(now()) @updatedAt @db.Timestamptz(3)
   emergencia         Emergencia @relation(fields: [emergencia_id], references: [id], onDelete: Restrict)
   ofertas            Oferta[]
+  ronda_id           String? @db.Uuid
+  ronda              Ronda? @relation(fields: [ronda_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([emergencia_id])
   @@map("lotes")
@@ -93,8 +100,83 @@ model Oferta {
   updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz(3)
   lote              Lote     @relation(fields: [lote_id], references: [id], onDelete: Restrict)
   ong_usuario       Usuario  @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict)
+  activa            Boolean @default(true)
+  adjudicacion      Adjudicacion?
 
   @@index([lote_id])
   @@index([ong_usuario_id])
   @@map("ofertas")
+}
+
+model Ronda {
+  id String @id @default(uuid()) @db.Uuid
+  emergencia_id String @db.Uuid
+  numero Int
+  tarea_lotes_id String? @db.VarChar(19)
+  publicada_at DateTime? @db.Timestamptz(3)
+  seleccionada_at DateTime? @db.Timestamptz(3)
+  ofertas_vistas_at DateTime? @db.Timestamptz(3)
+  monitoreo_finalizado_at DateTime? @db.Timestamptz(3)
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  emergencia Emergencia @relation(fields: [emergencia_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lotes Lote[]
+  ventanas VentanaConvocatoria[]
+  participaciones ParticipacionOng[]
+  @@unique([emergencia_id, numero])
+  @@unique([emergencia_id, tarea_lotes_id])
+  @@map("rondas")
+}
+
+model VentanaConvocatoria {
+  id String @id @default(uuid()) @db.Uuid
+  ronda_id String @db.Uuid
+  actividad_id String @unique @db.VarChar(80)
+  abierta_at DateTime @default(now()) @db.Timestamptz(3)
+  vence_at DateTime @db.Timestamptz(3)
+  cerrada_at DateTime? @db.Timestamptz(3)
+  cobertura Json?
+  ronda Ronda @relation(fields: [ronda_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@index([ronda_id])
+  @@map("ventanas_convocatoria")
+}
+
+model Adjudicacion {
+  id String @id @default(uuid()) @db.Uuid
+  oferta_id String @unique @db.Uuid
+  municipio_id String @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  oferta Oferta @relation(fields: [oferta_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  municipio Usuario @relation(fields: [municipio_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@map("adjudicaciones")
+}
+
+model ParticipacionOng {
+  id String @id @default(uuid()) @db.Uuid
+  ronda_id String @db.Uuid
+  ong_usuario_id String @db.Uuid
+  lectura_at DateTime? @db.Timestamptz(3)
+  finalizada_at DateTime? @db.Timestamptz(3)
+  ronda Ronda @relation(fields: [ronda_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ong_usuario Usuario @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([ronda_id, ong_usuario_id])
+  @@map("participaciones_ong")
+}
+
+model AccionWorkflow {
+  id String @id @db.Uuid
+  emergencia_id String @db.Uuid
+  actor_id String @db.Uuid
+  accion String @db.VarChar(40)
+  task_id String? @unique @db.VarChar(19)
+  task_name String? @db.VarChar(100)
+  destinatario_id String? @db.Uuid
+  contrato Json
+  solicitud Json
+  estado String @default("PENDIENTE") @db.VarChar(20)
+  error_code String? @db.VarChar(80)
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+  emergencia Emergencia @relation(fields: [emergencia_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@index([emergencia_id])
+  @@map("acciones_workflow")
 }

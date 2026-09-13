@@ -527,3 +527,11 @@ footer {
     width: 100%;
   }
 }
+
+.workflow-state { margin-block: 1rem; }
+.workflow-buttons { display: flex; flex-wrap: wrap; gap: .65rem; margin-block: 1rem; }
+.offer-choice { display: flex; align-items: center; gap: .65rem; margin-block: .5rem; }
+.offer-choice input { width: auto; flex-shrink: 0; }
+.selection-list { margin-block: 1rem; }
+.confirmation { margin-block: 1rem; }
+.workflow-state p { overflow-wrap: anywhere; }

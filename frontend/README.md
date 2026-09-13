@@ -1,3 +1,9 @@
+# Actualizaci?n: acciones de workflow
+
+La pantalla de detalle incluye Estado Bonita, publicaci?n, decisi?n del coordinador, selecci?n municipal, notificaciones y actividades ONG, monitoreo y cierre. Ver [la gu?a de workflow](../BONITA_WORKFLOW.md) para configuraci?n y requisitos manuales de Studio.
+
+Con Bonita deshabilitado y validaci?n de desarrollo expl?cita: crear emergencia, guardar lotes, **Publicar convocatoria**, cargar ofertas, **Continuar a selecci?n**, adjudicar ofertas completas, confirmar lectura, finalizar actividades y monitoreo y cerrar. El frontend de pruebas Playwright usa **5174**; el frontend de desarrollo conserva **5173**. Las credenciales y el secreto de conectores permanecen en Node.
+
 # RescueSync — interfaz de Etapa 2
 
 Aplicación React + Vite + TypeScript, con React Router, Fetch y CSS responsive. Permite probar Municipio → Coordinador → ONG sobre el backend y PostgreSQL existentes.

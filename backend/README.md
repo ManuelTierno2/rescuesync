@@ -1,3 +1,9 @@
+# Actualizaci?n: workflow web completo
+
+Ver [BONITA_WORKFLOW.md](../BONITA_WORKFLOW.md) para migraci?n, endpoints, configuraci?n, reintentos y cambios manuales de Studio. La publicaci?n ahora es expl?cita, las ofertas requieren una ventana abierta y la adjudicaci?n requiere `OFERTAS_VALIDACION_MODE=DESARROLLO`. Los lotes y ofertas exigen `X-Dev-User-Id`, adem?s de las nuevas acciones. El contrato de Registrar emergencia del caso real #2 todav?a est? vac?o: ese caso no fue avanzado autom?ticamente.
+
+Los ejemplos de alta e instanciaci?n de abajo siguen describiendo sus endpoints, pero el recorrido de tareas y las instrucciones de prueba vigentes est?n en la gu?a de workflow.
+
 # RescueSync — backend de la Etapa 2
 
 Backend local con Node.js 24, Express 5, TypeScript, Prisma 7.10.0 y PostgreSQL. Permite registrar emergencias, crear lotes y recibir ofertas parciales, con inicio opcional de procesos en Bonita Community 2025.2.
@@ -238,7 +244,7 @@ Las consultas devuelven `200 { data: ... }`; las altas de lotes/ofertas devuelve
 | `GET /api/usuarios` | Usuarios existentes con `id`, `nombre`, `organizacion`, `rol`. |
 | `GET /api/emergencias` | Emergencias, más recientes primero, con la misma serialización del detalle. |
 | `GET /api/emergencias/:emergenciaId/lotes` | Lotes de la emergencia, más antiguos primero. |
-| `POST /api/emergencias/:emergenciaId/lotes` | Crear y publicar inmediatamente un lote. |
+| `POST /api/emergencias/:emergenciaId/lotes` | Guardar un lote en la ronda en preparaci?n; la publicaci?n es una acci?n separada. |
 | `GET /api/lotes/:loteId/ofertas` | Ofertas, más antiguas primero, con `ong_usuario` (los mismos campos públicos del selector). |
 | `POST /api/lotes/:loteId/ofertas` | Registrar una oferta y devolverla con `ong_usuario`. |
 

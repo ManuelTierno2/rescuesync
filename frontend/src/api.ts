@@ -17,6 +17,7 @@ export interface Emergencia {
   updated_at: string;
 }
 export interface Lote {
+  ronda_id: string | null;
   id: string;
   emergencia_id: string;
   tipo: 'PERSONAL' | 'RECURSO';
@@ -27,6 +28,8 @@ export interface Lote {
   updated_at: string;
 }
 export interface Oferta {
+  activa: boolean;
+  adjudicacion?: { id: string; created_at: string } | null;
   id: string;
   lote_id: string;
   ong_usuario_id: string;
@@ -58,6 +61,8 @@ export class ApiError extends Error {
   }
 }
 const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/+$/, '');
+let devUserId = '';
+export function setApiUserId(id: string) { devUserId = id; }
 
 export async function api<T>(
   path: string,
@@ -68,7 +73,7 @@ export async function api<T>(
   try {
     response = await fetch(base + path, {
       method: isPost ? 'POST' : 'GET',
-      headers: isPost ? { 'Content-Type': 'application/json' } : undefined,
+      headers: { ...(isPost ? { 'Content-Type': 'application/json' } : {}), ...(devUserId ? { 'X-Dev-User-Id': devUserId } : {}) },
       body: isPost ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
     });
