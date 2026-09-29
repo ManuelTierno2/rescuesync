@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: rescuesync-postgres
+    environment:
+      POSTGRES_USER: rescuesync
+      POSTGRES_PASSWORD: rescuesync
+      POSTGRES_DB: rescuesync
+    ports:
+      - "5432:5432"
+    volumes:
+      - rescuesync_pg16:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rescuesync -d rescuesync"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  rescuesync_pg16:
+
