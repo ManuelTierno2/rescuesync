@@ -3,7 +3,9 @@ export type Gravedad = 'BAJA' | 'MEDIA' | 'ALTA' | 'CRITICA';
 export interface Usuario {
   id: string;
   nombre: string;
+  email?: string;
   organizacion: string;
+  organizacion_id?: string | null;
   rol: Role;
 }
 export interface Emergencia {
@@ -35,9 +37,36 @@ export interface Oferta {
   ong_usuario_id: string;
   cantidad_ofrecida: number;
   observaciones: string | null;
+  version: number;
+  consorcio_id?: string | null;
+  inventario_item_id?: string | null;
   ong_usuario: Usuario;
   created_at: string;
   updated_at: string;
+}
+export interface InventarioItem {
+  id: string;
+  ong_usuario_id: string;
+  tipo: 'PERSONAL' | 'RECURSO';
+  descripcion: string;
+  cantidad: number;
+  unidad: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface Consorcio {
+  id: string;
+  nombre: string;
+  creado_por_id: string;
+  creado_por: Usuario;
+  miembros: { id: string; ong_usuario_id: string; ong_usuario: Usuario }[];
+  created_at: string;
+}
+export interface Organizacion {
+  id: string;
+  nombre: string;
+  tipo: 'MUNICIPIO' | 'CENTRO_COORDINADOR' | 'ONG' | 'AUDITORIA';
+  created_at: string;
 }
 export interface Warning {
   code: string;
@@ -61,26 +90,47 @@ export class ApiError extends Error {
   }
 }
 const base = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/+$/, '');
-let devUserId = '';
-export function setApiUserId(id: string) { devUserId = id; }
+const tokenKey = 'rescuesync.jwt';
+
+export function getToken() {
+  try {
+    return localStorage.getItem(tokenKey) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setToken(token: string) {
+  try {
+    if (token) localStorage.setItem(tokenKey, token);
+    else localStorage.removeItem(tokenKey);
+  } catch {
+    /* ignore */
+  }
+}
 
 export async function api<T>(
   path: string,
-  options: { body?: unknown; signal?: AbortSignal } = {},
+  options: { body?: unknown; method?: string; signal?: AbortSignal } = {},
 ): Promise<ApiResult<T>> {
-  const isPost = options.body !== undefined;
+  const method = options.method || (options.body !== undefined ? 'POST' : 'GET');
+  const hasBody = options.body !== undefined;
+  const token = getToken();
   let response: Response;
   try {
     response = await fetch(base + path, {
-      method: isPost ? 'POST' : 'GET',
-      headers: { ...(isPost ? { 'Content-Type': 'application/json' } : {}), ...(devUserId ? { 'X-Dev-User-Id': devUserId } : {}) },
-      body: isPost ? JSON.stringify(options.body) : undefined,
+      method,
+      headers: {
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: 'Bearer ' + token } : {}),
+      },
+      body: hasBody ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
     });
   } catch (error) {
     if (options.signal?.aborted) throw error;
     throw new ApiError(
-      isPost
+      method !== 'GET'
         ? 'No se pudo confirmar el resultado. Consulte los registros antes de repetir el envío.'
         : 'No se pudo conectar con la API. Compruebe que el backend esté disponible.',
     );
@@ -90,7 +140,7 @@ export async function api<T>(
     result = await response.json();
   } catch {
     throw new ApiError(
-      isPost
+      method !== 'GET'
         ? 'La API devolvió una respuesta inesperada. Consulte los registros antes de repetir el envío.'
         : 'La API devolvió una respuesta inesperada.',
     );

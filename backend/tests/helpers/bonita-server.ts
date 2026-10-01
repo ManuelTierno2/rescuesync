@@ -25,9 +25,18 @@ export async function bonitaServer(options: StubOptions = {}) {
     const task: StubTask = { id: String(++sequence), caseId, name, state: 'ready', assigned_id: '0', ongUsuarioId };
     tasks.push(task); return task;
   }
-  function expire(caseId: string, covered: boolean) {
-    for (const t of tasks.filter(t => t.caseId === caseId && t.name === 'recibir ofertas')) t.state = 'aborted';
-    addTask(caseId, covered ? 'Visualizar ofertas validas' : 'Decidir curso accion');
+  /** Simula el timer de "Cargar o editar ofertas": aborta la actividad y avanza el XOR de cobertura. */
+  function expire(caseId: string, covered: boolean, recipients?: string[]) {
+    for (const t of tasks.filter(t => t.caseId === caseId && t.name === 'Cargar o editar ofertas')) t.state = 'aborted';
+    if (!covered) {
+      addTask(caseId, 'Generar y publicar lotes');
+      return;
+    }
+    const c = cases.get(caseId) ?? { processId: PROCESS_ID, completed: false, recipients: [] };
+    if (!cases.has(caseId)) cases.set(caseId, c);
+    if (recipients) c.recipients = recipients;
+    addTask(caseId, 'Monitorear despliegue');
+    for (const r of c.recipients) addTask(caseId, 'Marcar actividad finalizada', r);
   }
   function advance(task: StubTask, values: Record<string, unknown>) {
     task.state = 'completed'; archivedTasks.push({ ...task, id: String(++sequence), sourceObjectId: task.id });
@@ -35,18 +44,11 @@ export async function bonitaServer(options: StubOptions = {}) {
     const add = (name: string, recipient?: string) => addTask(task.caseId, name, recipient);
     switch (task.name) {
       case 'Registrar emergencia': add('Generar y publicar lotes'); break;
-      case 'Generar y publicar lotes': add('recibir ofertas'); break;
-      case 'Decidir curso accion': add(values.cursoAccion === 'REABRIR' ? 'recibir ofertas' : values.cursoAccion === 'REFORMULAR' ? 'Generar y publicar lotes' : 'Visualizar ofertas validas'); break;
-      case 'Visualizar ofertas validas': add('Seleccionar ofertas'); break;
-      case 'Seleccionar ofertas': c.recipients = values.ongDestinatarios as string[]; for (const r of c.recipients) add('Visualizar notificacion', r); break;
-      case 'Visualizar notificacion':
-        if (!tasks.some(t => t.caseId === task.caseId && t.name === task.name && t.state === 'ready')) {
-          add('Monitorear despliegue'); for (const r of c.recipients) add('Marcar actividad finalizada', r);
-        } break;
+      case 'Generar y publicar lotes': add('Cargar o editar ofertas'); break;
       case 'Monitorear despliegue': case 'Marcar actividad finalizada':
-        if (!tasks.some(t => t.caseId === task.caseId && ['Monitorear despliegue', 'Marcar actividad finalizada'].includes(t.name) && t.state === 'ready')) add('Cerrar operativo');
+        if (!tasks.some(t => t.caseId === task.caseId && ['Monitorear despliegue', 'Marcar actividad finalizada'].includes(t.name) && t.state === 'ready'))
+          c.completed = true;
         break;
-      case 'Cerrar operativo': c.completed = true; break;
     }
   }
   const server = createServer(async (req, res) => {
@@ -108,16 +110,14 @@ export async function bonitaServer(options: StubOptions = {}) {
         if (!task) { res.writeHead(404).end('{}'); return; }
         const sub = parts[6];
         if (sub === 'contract') {
-          const name = task.name === 'Registrar emergencia' ? 'emergenciaId' : task.name === 'Decidir curso accion' ? 'cursoAccion' : task.name === 'Seleccionar ofertas' ? 'ongDestinatarios' : null;
-          res.end(JSON.stringify(options.contractOverride ?? { inputs: name ? [{ name, type: 'TEXT', multiple: name === 'ongDestinatarios' }] : [] }));
+          const name = task.name === 'Registrar emergencia' ? 'emergenciaId' : null;
+          res.end(JSON.stringify(options.contractOverride ?? { inputs: name ? [{ name, type: 'TEXT', multiple: false }] : [] }));
         } else if (sub === 'context') res.end('{}');
         else if (sub === 'execution') {
           if (task.state !== 'ready') { res.writeHead(409).end('{}'); return; }
           if (options.executionStatus && options.executionStatus !== 204) { res.writeHead(options.executionStatus).end('{}'); return; }
           const values = JSON.parse(body) as Record<string, unknown>;
-          if ((task.name === 'Registrar emergencia' && typeof values.emergenciaId !== 'string')
-            || (task.name === 'Decidir curso accion' && !['REABRIR', 'REFORMULAR', 'PARCIAL'].includes(String(values.cursoAccion)))
-            || (task.name === 'Seleccionar ofertas' && !Array.isArray(values.ongDestinatarios))) { res.writeHead(400).end('{}'); return; }
+          if (task.name === 'Registrar emergencia' && typeof values.emergenciaId !== 'string') { res.writeHead(400).end('{}'); return; }
           await options.onExecution?.(task);
           advance(task, values);
           if (options.delayExecutionMs) await setTimeout(options.delayExecutionMs);

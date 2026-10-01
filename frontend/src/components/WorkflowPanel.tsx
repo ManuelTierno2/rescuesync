@@ -1,23 +1,22 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { api, type Warning } from '../api';
-import { useDevUser } from '../user-context';
+import { useDevUser } from '../auth-context';
 import { ErrorMessage, formatDate } from '../ui';
 import type { useWorkflow } from '../workflow';
 
 const labels: Record<string, string> = {
-  registrar: 'Completar registro en Bonita', publicar: 'Publicar convocatoria', decidir: 'Confirmar curso de acción',
+  registrar: 'Completar registro en Bonita', publicar: 'Publicar convocatoria',
   'ver-ofertas': 'Continuar a selección', adjudicar: 'Confirmar adjudicación', leer: 'Confirmar lectura',
   'finalizar-actividad': 'Marcar actividad finalizada', 'finalizar-monitoreo': 'Finalizar monitoreo / continuar cierre',
   cerrar: 'Cerrar operativo', 'nueva-ronda': 'Preparar nueva ronda',
 };
-const roles: Record<string, string> = { registrar: 'MUNICIPIO', publicar: 'COORDINADOR', decidir: 'COORDINADOR',
+const roles: Record<string, string> = { registrar: 'MUNICIPIO', publicar: 'COORDINADOR',
   'ver-ofertas': 'MUNICIPIO', adjudicar: 'MUNICIPIO', leer: 'ONG', 'finalizar-actividad': 'ONG',
   'finalizar-monitoreo': 'COORDINADOR', cerrar: 'COORDINADOR', 'nueva-ronda': 'COORDINADOR' };
 export function WorkflowPanel({ id, query, onChanged }: { id: string; query: ReturnType<typeof useWorkflow>; onChanged: () => void }) {
   const { user } = useDevUser();
   const { data, monitoring } = query;
   const [selection, setSelection] = useState<string[]>([]);
-  const [course, setCourse] = useState('REABRIR');
   const [confirm, setConfirm] = useState<string>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -40,7 +39,8 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
     if (action === 'adjudicar') return !!round?.ofertas_vistas_at && !round.seleccionada_at && !!selection.length && !overflow && data!.validationMode === 'DESARROLLO';
     if (action === 'leer' || action === 'finalizar-actividad') {
       if (!myParticipation || (action === 'leer' ? myParticipation.lectura_at : myParticipation.finalizada_at || !myParticipation.lectura_at)) return false;
-      if (data!.enabled) return data!.readyTasks.some(t => t.ongUsuarioId === user?.id && t.name === (action === 'leer' ? 'Visualizar notificacion' : 'Marcar actividad finalizada'));
+      if (action === 'finalizar-actividad' && data!.enabled)
+        return data!.readyTasks.some(t => t.ongUsuarioId === user?.id && t.name === 'Marcar actividad finalizada');
     }
     if (action === 'finalizar-monitoreo') return !!round?.seleccionada_at && !round.monitoreo_finalizado_at;
     if (action === 'cerrar') return !!round?.seleccionada_at && !!round.monitoreo_finalizado_at && round.participaciones.every(p => p.finalizada_at);
@@ -52,7 +52,7 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
     try {
       requestId.current ??= crypto.randomUUID();
       const body = reconcileId || action === 'nueva-ronda' ? {} : { accionId: requestId.current,
-        ...(action === 'decidir' ? { cursoAccion: course } : {}), ...(action === 'adjudicar' ? { ofertaIds: selection } : {}) };
+        ...(action === 'adjudicar' ? { ofertaIds: selection } : {}) };
       const result = await api(`/emergencias/${id}/acciones/${reconcileId ? reconcileId + '/reconciliar' : action}`, { body });
       setWarnings(result.warnings ?? []); setFeedback(result.warnings?.length ? 'Datos guardados; sincronización pendiente.' : 'Acción confirmada.');
       setConfirm(undefined); requestId.current = undefined; onChanged();
@@ -66,7 +66,7 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
       <p>Tareas actuales: {data.readyTasks.length ? data.readyTasks.map(t => `${t.name} (#${t.id})`).join(' · ') : 'Sin tareas humanas disponibles'}</p>
       <p>Ronda {data.round?.numero ?? 1} · {data.localClosed ? 'Cierre local confirmado' : data.round?.publicada_at ? 'Publicada' : 'En preparación'}</p>
       {data.enabled && data.localClosed && data.state !== 'COMPLETED' && <p className="notice warning">El cierre está guardado localmente; falta confirmar el archivo del caso en Bonita.</p>}
-      {!data.enabled && <p className="muted">Operaciones locales. Los timers y las decisiones de routing requieren Bonita.</p>}
+      {!data.enabled && <p className="muted">Operaciones locales. Los timers de convocatoria requieren Bonita.</p>}
       <ErrorMessage error={query.error} retry={query.refresh} />
       {query.warnings.map((w, i) => <p className="notice warning" key={i}>{w.message}</p>)}
       {data.windows.filter(w => !w.cerrada_at).map(w => <p key={w.id}>Ventana: {data.enabled ? 'vence ' + formatDate(w.vence_at) : 'abierta hasta confirmar adjudicación'}</p>)}
@@ -77,9 +77,6 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
       <ErrorMessage error={error} />
       {feedback && <p role="status">{feedback}</p>}
       {warnings.map((w, i) => <p className="notice warning" role="alert" key={i}>{w.message}</p>)}
-      {available('decidir') && <label>Curso de acción <select value={course} disabled={pending || !!confirm} onChange={e => setCourse(e.target.value)}>
-        <option>REABRIR</option><option>REFORMULAR</option><option>PARCIAL</option>
-      </select></label>}
       {user?.rol === 'MUNICIPIO' && round?.publicada_at && <div className="selection-list">
         <h3>Ofertas disponibles / selección</h3>
         {lots.map(l => <div key={l.id}><h4>{l.descripcion}</h4>
@@ -101,7 +98,7 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
       <div className="workflow-buttons">{Object.keys(labels).filter(available).map(action => <button type="button" key={action}
         disabled={pending || !!confirm || !allowed(action)} onClick={() => { setConfirm(action); setError(undefined); requestId.current = undefined; }}>{labels[action]}</button>)}</div>
       {confirm && <div className="notice confirmation" role="group" aria-label="Confirmar acción">
-        <p>Confirmar: {labels[confirm]}{confirm === 'decidir' ? ' · ' + course : ''}.</p>
+        <p>Confirmar: {labels[confirm]}.</p>
         <button type="button" disabled={pending} onClick={() => void send(confirm)}>{pending ? 'Guardando…' : 'Confirmar acción'}</button>{' '}
         <button type="button" disabled={pending} onClick={() => { setConfirm(undefined); requestId.current = undefined; }}>Cancelar</button>
       </div>}

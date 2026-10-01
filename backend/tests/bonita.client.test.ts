@@ -109,20 +109,31 @@ describe('Bonita Community 2025.2: contrato REST oficial 1.0.6', () => {
   });
 
   it('deshabilitado no conecta ni exige credenciales y true/false se interpretan explícitamente', async () => {
-    const base = { DATABASE_URL: 'postgresql://localhost/rescuesync', BONITA_ENABLED: 'false', BONITA_URL: 'invalid' };
+    const base = {
+      DATABASE_URL: 'postgresql://localhost/rescuesync',
+      BONITA_ENABLED: 'false',
+      BONITA_URL: 'invalid',
+      JWT_SECRET: 'test-jwt-secret-at-least-32-characters!!',
+    };
     const env = readEnv(base);
     assert.deepEqual(env.bonita, { enabled: false });
     // The disabled implementation never reads the emergency.
     assert.equal(await createBonitaService(env.bonita).startRescueSyncProcess(undefined as never), null);
-    assert.equal(readEnv({ DATABASE_URL: base.DATABASE_URL }).bonita.enabled, false);
+    assert.equal(readEnv({ DATABASE_URL: base.DATABASE_URL, JWT_SECRET: base.JWT_SECRET }).bonita.enabled, false);
     for (const value of ['yes', '0', 'FALSE']) assert.throws(() => readEnv({ ...base, BONITA_ENABLED: value }), /BONITA_ENABLED/);
     assert.throws(() => readEnv({ ...base, BONITA_ENABLED: 'true' }), /BONITA_URL.*BONITA_USERNAME.*BONITA_PASSWORD.*BONITA_PROCESS_ID/);
   });
 
   it('valida configuración habilitada sin conectarse a Bonita', () => {
-    const source = { DATABASE_URL: 'postgresql://localhost/rescuesync', BONITA_ENABLED: 'true',
-      BONITA_URL: 'http://localhost:8080/bonita', BONITA_USERNAME: 'test', BONITA_PASSWORD: 'secret-value',
-      BONITA_PROCESS_ID: PROCESS_ID };
+    const source = {
+      DATABASE_URL: 'postgresql://localhost/rescuesync',
+      BONITA_ENABLED: 'true',
+      BONITA_URL: 'http://localhost:8080/bonita',
+      BONITA_USERNAME: 'test',
+      BONITA_PASSWORD: 'secret-value',
+      BONITA_PROCESS_ID: PROCESS_ID,
+      JWT_SECRET: 'test-jwt-secret-at-least-32-characters!!',
+    };
     assert.equal(readEnv(source).bonita.enabled, true);
     for (const [key, value] of [['BONITA_URL', 'ftp://localhost/bonita'], ['BONITA_PROCESS_ID', '1.5'], ['BONITA_TIMEOUT_MS', '0']]) {
       assert.throws(() => readEnv({ ...source, [key!]: value }), (error: unknown) => {

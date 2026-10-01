@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, type Emergencia, type Gravedad } from '../api';
 import { useSubmission } from '../hooks';
-import { useDevUser } from '../user-context';
+import { useDevUser } from '../auth-context';
 import { ErrorMessage, Field } from '../ui';
 
 function EmergencyForm({ userId }: { userId: string }) {
@@ -80,7 +80,7 @@ export function NuevaEmergenciaPage() {
         <EmergencyForm key={user.id} userId={user.id} />
       ) : (
         <p className="notice">
-          Seleccione un usuario con rol MUNICIPIO para registrar una emergencia.
+          Inicie sesión con un usuario MUNICIPIO para registrar una emergencia.
         </p>
       )}
     </>

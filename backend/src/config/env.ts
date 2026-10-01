@@ -26,6 +26,9 @@ const envSchema = z.object({
   BONITA_WORKFLOW_PROCESS_IDS: z.string().default('').refine(v => !v || v.split(',').every(id => isBonitaId(id.trim()))),
   BONITA_CALLBACK_SECRET: z.string().default('').refine(v => !v || v.length >= 32),
   OFERTAS_VALIDACION_MODE: z.enum(['PENDIENTE', 'DESARROLLO']).default('PENDIENTE'),
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET debe tener al menos 32 caracteres.'),
+  JWT_EXPIRES_IN: z.string().trim().min(1).default('8h'),
+  AUTH_ALLOW_DEV_HEADER: z.enum(['true', 'false']).optional(),
 });
 
 const bonitaSchema = z.object({
@@ -40,6 +43,12 @@ const bonitaSchema = z.object({
   BONITA_PROCESS_ID: z.string().refine(isBonitaId),
   BONITA_TIMEOUT_MS: z.coerce.number().int().min(1).max(60000).default(10000),
 });
+
+export type AuthConfig = {
+  jwtSecret: string;
+  jwtExpiresIn: string;
+  allowDevHeader: boolean;
+};
 
 export function readEnv(source: NodeJS.ProcessEnv = process.env) {
   const result = envSchema.safeParse(source);
@@ -60,5 +69,33 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env) {
       timeoutMs: settings.data.BONITA_TIMEOUT_MS,
     };
   }
-  return { ...result.data, bonita };
+  const allowDevHeader = result.data.AUTH_ALLOW_DEV_HEADER
+    ? result.data.AUTH_ALLOW_DEV_HEADER === 'true'
+    : result.data.NODE_ENV === 'test';
+  return {
+    ...result.data,
+    bonita,
+    auth: {
+      jwtSecret: result.data.JWT_SECRET,
+      jwtExpiresIn: result.data.JWT_EXPIRES_IN,
+      allowDevHeader,
+    } satisfies AuthConfig,
+  };
+}
+
+/** Lectura laxa para tests/middleware cuando no se pasa por server.ts. */
+export function readAuthConfig(source: NodeJS.ProcessEnv = process.env): AuthConfig {
+  const secret = source.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new EnvError(['JWT_SECRET']);
+  }
+  const nodeEnv = source.NODE_ENV === 'test' || source.NODE_ENV === 'production' ? source.NODE_ENV : 'development';
+  const allowDevHeader = source.AUTH_ALLOW_DEV_HEADER
+    ? source.AUTH_ALLOW_DEV_HEADER === 'true'
+    : nodeEnv === 'test';
+  return {
+    jwtSecret: secret,
+    jwtExpiresIn: source.JWT_EXPIRES_IN?.trim() || '8h',
+    allowDevHeader,
+  };
 }

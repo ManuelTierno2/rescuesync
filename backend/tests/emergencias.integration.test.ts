@@ -29,9 +29,11 @@ const validBody = {
   zona: 'Barrio Centro',
   descripcion: 'Inundación con viviendas afectadas.',
 };
+const asUser = (id: string) => ({ 'X-Dev-User-Id': id });
+const asMunicipio = () => asUser(MUNICIPIO_DEMO_ID);
 
 async function createEmergency() {
-  const response = await request(app).post('/api/emergencias').send(validBody).expect(201);
+  const response = await request(app).post('/api/emergencias').set(asMunicipio()).send(validBody).expect(201);
   owned.emergencias.push(response.body.data.id);
   return response;
 }
@@ -105,7 +107,7 @@ describe('Emergencias y persistencia PostgreSQL', () => {
     for (const gravedad of ['BAJA', 'MEDIA', 'ALTA', 'CRITICA']) {
       const zona = gravedad === 'CRITICA' ? 'z'.repeat(200) : 'Centro';
       const descripcion = gravedad === 'CRITICA' ? 'd'.repeat(5000) : 'Descripción';
-      const response = await request(app).post('/api/emergencias')
+      const response = await request(app).post('/api/emergencias').set(asMunicipio())
         .send({ ...validBody, gravedad, zona: ` ${zona} `, descripcion: ` ${descripcion} ` }).expect(201);
       owned.emergencias.push(response.body.data.id);
       assert.equal(response.body.data.zona, zona);
@@ -146,7 +148,7 @@ describe('Emergencias y persistencia PostgreSQL', () => {
       { ...validBody, desconocido: true },
     ];
     for (const body of bodies) {
-      const response = await request(app).post('/api/emergencias').set('Content-Type', 'application/json')
+      const response = await request(app).post('/api/emergencias').set(asMunicipio()).set('Content-Type', 'application/json')
         .send(JSON.stringify(body));
       assert.equal(response.status, 400, JSON.stringify(body));
       assert.ok(['VALIDATION_ERROR', 'INVALID_JSON'].includes(response.body.error.code));
@@ -156,17 +158,19 @@ describe('Emergencias y persistencia PostgreSQL', () => {
   });
 
   it('rechaza JSON mal formado, cuerpo ausente, texto plano y cuerpos demasiado grandes', async () => {
-    assertError(await request(app).post('/api/emergencias').type('json').send('{'), 400, 'INVALID_JSON');
-    assertError(await request(app).post('/api/emergencias'), 400, 'VALIDATION_ERROR');
-    assertError(await request(app).post('/api/emergencias').type('text').send('texto'), 400, 'VALIDATION_ERROR');
-    assertError(await request(app).post('/api/emergencias').send({ ...validBody, descripcion: 'x'.repeat(110000) }),
+    assertError(await request(app).post('/api/emergencias').set(asMunicipio()).type('json').send('{'), 400, 'INVALID_JSON');
+    assertError(await request(app).post('/api/emergencias').set(asMunicipio()), 400, 'VALIDATION_ERROR');
+    assertError(await request(app).post('/api/emergencias').set(asMunicipio()).type('text').send('texto'), 400, 'VALIDATION_ERROR');
+    assertError(await request(app).post('/api/emergencias').set(asMunicipio()).send({ ...validBody, descripcion: 'x'.repeat(110000) }),
       400, 'BODY_TOO_LARGE');
+    assertError(await request(app).post('/api/emergencias').send(validBody), 401, 'UNAUTHORIZED');
   });
 
   it('rechaza autores inexistentes y los tres roles no municipales', async () => {
     const count = await prisma.emergencia.count();
-    for (const creada_por_id of [randomUUID(), ...otrosRoles.values()]) {
-      assertError(await request(app).post('/api/emergencias').send({ ...validBody, creada_por_id }), 422, 'INVALID_CREATOR');
+    assertError(await request(app).post('/api/emergencias').set(asMunicipio()).send({ ...validBody, creada_por_id: randomUUID() }), 403, 'FORBIDDEN_OWNER');
+    for (const creada_por_id of [...otrosRoles.values()]) {
+      assertError(await request(app).post('/api/emergencias').set(asUser(creada_por_id)).send({ ...validBody, creada_por_id }), 422, 'INVALID_CREATOR');
     }
     assert.equal(await prisma.emergencia.count(), count);
   });
@@ -308,13 +312,13 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     const lotesCount = await prisma.lote.count();
     const ofertasCount = await prisma.oferta.count();
     for (const cantidad of [0, -1, 1.5, 2147483648, '2', null]) {
-      assertError(await request(app).post('/api/emergencias/' + created.body.data.id + '/lotes').send({ ...loteBody, cantidad_requerida: cantidad }), 400, 'VALIDATION_ERROR');
+      assertError(await request(app).post('/api/emergencias/' + created.body.data.id + '/lotes').set('X-Dev-User-Id', COORDINADOR_DEMO_ID).send({ ...loteBody, cantidad_requerida: cantidad }), 400, 'VALIDATION_ERROR');
       assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', otrosRoles.get('ONG')!).send({ ...ofertaBody, cantidad_ofrecida: cantidad }), 400, 'VALIDATION_ERROR');
     }
     for (const change of [
       { tipo: 'OTRO' }, { descripcion: ' ' }, { descripcion: 'd'.repeat(5001) }, { unidad: ' ' },
       { unidad: 'u'.repeat(51) }, { emergencia_id: randomUUID() }, { id: randomUUID() }, { created_at: 'now' },
-    ]) assertError(await request(app).post('/api/emergencias/' + created.body.data.id + '/lotes').send({ ...loteBody, ...change }), 400, 'VALIDATION_ERROR');
+    ]) assertError(await request(app).post('/api/emergencias/' + created.body.data.id + '/lotes').set('X-Dev-User-Id', COORDINADOR_DEMO_ID).send({ ...loteBody, ...change }), 400, 'VALIDATION_ERROR');
     for (const change of [
       { ong_usuario_id: 'invalid' }, { observaciones: 42 }, { observaciones: 'o'.repeat(5001) },
       { lote_id: randomUUID() }, { id: randomUUID() }, { updated_at: 'now' },
@@ -336,14 +340,15 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
       assertError(await request(app).get(path), 400, 'VALIDATION_ERROR');
       assertError(await request(app).post(path).send({}), 400, 'VALIDATION_ERROR');
     }
-    for (const ong_usuario_id of [unknown, MUNICIPIO_DEMO_ID, otrosRoles.get('COORDINADOR'), otrosRoles.get('AUDITOR')]) {
-      assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', ong_usuario_id!).send({ ...ofertaBody, ong_usuario_id }), 422, 'INVALID_ONG');
+    assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', unknown).send({ ...ofertaBody, ong_usuario_id: unknown }), 401, 'UNAUTHORIZED');
+    for (const ong_usuario_id of [MUNICIPIO_DEMO_ID, otrosRoles.get('COORDINADOR')!, otrosRoles.get('AUDITOR')!]) {
+      assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', ong_usuario_id).send({ ...ofertaBody, ong_usuario_id }), 403, 'FORBIDDEN_ROLE');
     }
     assert.equal(await prisma.oferta.count({ where: { lote_id: item.id } }), 0);
   });
   it('admite el origen local y preflight de JSON sin credenciales', async () => {
     const response = await request(app).options('/api/emergencias').set('Origin', 'http://localhost:5173')
-      .set('Access-Control-Request-Method', 'POST').set('Access-Control-Request-Headers', 'content-type').expect(204);
+      .set('Access-Control-Request-Method', 'POST').set('Access-Control-Request-Headers', 'content-type,authorization').expect(204);
     assert.equal(response.headers['access-control-allow-origin'], 'http://localhost:5173');
     assert.match(response.headers['access-control-allow-methods']!, /POST/);
     assert.equal(response.headers['access-control-allow-credentials'], undefined);
@@ -366,7 +371,7 @@ describe('Alta de emergencia e integración Bonita con PostgreSQL', () => {
       } });
       try {
         const response = await request(createApp(prisma, createBonitaService(stub.config))).post('/api/emergencias')
-          .send({ ...validBody, zona }).expect(201);
+          .set(asMunicipio()).send({ ...validBody, zona }).expect(201);
         owned.emergencias.push(response.body.data.id);
         assert.ok(persistedBeforeStart);
         assert.deepEqual(stub.failures, []);
@@ -382,14 +387,14 @@ describe('Alta de emergencia e integración Bonita con PostgreSQL', () => {
     const stub = await bonitaServer();
     try {
       assertError(await request(createApp(prisma, createBonitaService(stub.config))).post('/api/emergencias')
-        .send({ ...validBody, creada_por_id: otrosRoles.get('ONG') }), 422, 'INVALID_CREATOR');
+        .set(asUser(otrosRoles.get('ONG')!)).send({ ...validBody, creada_por_id: otrosRoles.get('ONG') }), 422, 'INVALID_CREATOR');
       assert.equal(stub.requests.length, 0);
     } finally { await stub.close(); }
   });
   it('devuelve 201 con la emergencia conservada cuando falla Bonita', async () => {
     const stub = await bonitaServer({ loginStatus: 401 });
     try {
-      const response = await request(createApp(prisma, createBonitaService(stub.config))).post('/api/emergencias').send(validBody).expect(201);
+      const response = await request(createApp(prisma, createBonitaService(stub.config))).post('/api/emergencias').set(asMunicipio()).send(validBody).expect(201);
       owned.emergencias.push(response.body.data.id);
       assert.equal(response.body.data.bonita_instance_id, null);
       assert.equal(response.body.warnings[0].code, 'BONITA_AUTH_FAILED');
@@ -399,7 +404,7 @@ describe('Alta de emergencia e integración Bonita con PostgreSQL', () => {
   it('con Bonita detenido mantiene el alta y devuelve advertencia', async () => {
     const stub = await bonitaServer();
     await stub.close();
-    const response = await request(createApp(prisma, createBonitaService(stub.config))).post('/api/emergencias').send(validBody).expect(201);
+    const response = await request(createApp(prisma, createBonitaService(stub.config))).post('/api/emergencias').set(asMunicipio()).send(validBody).expect(201);
     owned.emergencias.push(response.body.data.id);
     assert.equal(response.body.warnings[0].code, 'BONITA_CONNECTION_FAILED');
     assert.equal((await prisma.emergencia.findUniqueOrThrow({ where: { id: response.body.data.id } })).bonita_instance_id, null);
@@ -411,7 +416,7 @@ describe('Alta de emergencia e integración Bonita con PostgreSQL', () => {
     const stub = await bonitaServer({ startBody: '{"caseId":"987654321"}' });
     try {
       const response = await request(createApp(extended as unknown as PrismaClient, createBonitaService(stub.config)))
-        .post('/api/emergencias').send(validBody).expect(201);
+        .post('/api/emergencias').set(asMunicipio()).send(validBody).expect(201);
       owned.emergencias.push(response.body.data.id);
       assert.equal(response.body.data.bonita_instance_id, null);
       assert.equal(response.body.warnings[0].code, 'BONITA_LINK_FAILED');

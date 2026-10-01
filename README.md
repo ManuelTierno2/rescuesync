@@ -8,7 +8,7 @@ Plataforma para coordinar respuesta ante desastres: municipios, centro coordinad
 | Backend (Node + Express + Prisma) | `backend/` | http://localhost:3000 |
 | Proceso Bonita | `app/` | Studio / http://localhost:8080/bonita |
 
-Documentación detallada: [backend/README.md](backend/README.md), [frontend/README.md](frontend/README.md), [BONITA_WORKFLOW.md](BONITA_WORKFLOW.md), [IMPLEMENTACION.md](IMPLEMENTACION.md).
+Documentación: [backend/README.md](backend/README.md), [frontend/README.md](frontend/README.md), [BONITA_WORKFLOW.md](BONITA_WORKFLOW.md), [IMPLEMENTACION.md](IMPLEMENTACION.md), [ENTREGA3.md](ENTREGA3.md) (Sistema Nacional, fuera de E2).
 
 ## Requisitos
 
@@ -56,7 +56,10 @@ Para recorrer el flujo web **sin** Sistema Nacional:
 ```dotenv
 OFERTAS_VALIDACION_MODE=DESARROLLO
 BONITA_ENABLED=false
+JWT_SECRET=change-me-rescuesync-jwt-secret-32c
 ```
+
+Abrí **http://localhost:5173/login**. Usuarios seed (password `demo1234`): `municipio@rescuesync.test`, `coordinador@rescuesync.test`, `ong.a@rescuesync.test`, `ong.b@rescuesync.test`, `auditor@rescuesync.test`. Onboarding ONG: `/register`.
 
 ### 3. Backend
 
@@ -110,6 +113,9 @@ Abrí **http://localhost:5173**.
 | `BONITA_WORKFLOW_PROCESS_IDS` | IDs de definiciones habilitadas para el workflow completo; vacío bloquea tramos nuevos | (vacío) |
 | `BONITA_CALLBACK_SECRET` | Secreto de conectores Studio (≥32 chars); nunca en `VITE_*` | (vacío) |
 | `OFERTAS_VALIDACION_MODE` | `PENDIENTE` (seguro) o `DESARROLLO` (permite adjudicar sin SN) | `PENDIENTE` |
+| `JWT_SECRET` | Secreto firma JWT (**≥32 caracteres**) | (obligatorio) |
+| `JWT_EXPIRES_IN` | Expiración del token | `8h` |
+| `AUTH_ALLOW_DEV_HEADER` | Acepta `X-Dev-User-Id` (solo tests/dev) | `false` (en test, default true) |
 
 Con `BONITA_ENABLED=false` no hace falta completar el resto de variables Bonita.
 
@@ -123,22 +129,21 @@ No poner credenciales Bonita en el frontend (`VITE_*` se empaquetan en el client
 
 ## Usuarios de desarrollo (seed)
 
-Selector en la UI (modo desarrollo, sin login real):
+Login JWT (password `demo1234`):
 
-| Rol | Organización | ID |
+| Rol | Email | Organización |
 |---|---|---|
-| MUNICIPIO | Municipio de prueba | `11111111-1111-4111-8111-111111111111` |
-| COORDINADOR | Centro Coordinador | `22222222-2222-4222-8222-222222222222` |
-| ONG | ONG A | `33333333-3333-4333-8333-333333333333` |
-| ONG | ONG B | `44444444-4444-4444-8444-444444444444` |
-| AUDITOR | Auditoría | `55555555-5555-4555-8555-555555555555` |
+| MUNICIPIO | `municipio@rescuesync.test` | Municipio de prueba |
+| COORDINADOR | `coordinador@rescuesync.test` | Centro Coordinador |
+| ONG | `ong.a@rescuesync.test` / `ong.b@…` | ONG A / ONG B |
+| AUDITOR | `auditor@rescuesync.test` | Auditoría |
 
 ## Flujo mínimo para probar la UI
 
-1. Rol **MUNICIPIO** → registrar emergencia.  
-2. Rol **COORDINADOR** → crear lotes → **Publicar convocatoria**.  
-3. Rol **ONG** → cargar ofertas.  
-4. Con `OFERTAS_VALIDACION_MODE=DESARROLLO`, seguir adjudicación / cierre desde el panel de workflow.
+1. Login como **MUNICIPIO** → registrar emergencia.
+2. Login **COORDINADOR** → crear lotes → **Publicar convocatoria**.
+3. Login **ONG** → inventario / consorcios (opcional) → cargar u editar ofertas (versionado).
+4. Con `OFERTAS_VALIDACION_MODE=DESARROLLO`, municipio adjudica; ONG lee y finaliza; coordinador monitorea y cierra.
 
 ## Bonita (opcional)
 
@@ -151,10 +156,11 @@ Selector en la UI (modo desarrollo, sin login real):
 
 ```text
 rescuesync/
-├── frontend/          # React + Vite
-├── backend/           # Express + Prisma + integración Bonita
-├── app/               # Proyecto Bonita (diagrama BPMN)
-├── docker-compose.yml # Postgres opcional
+├── frontend/          # React + Vite (JWT)
+├── backend/           # Express + Prisma + Bonita + auth
+├── app/               # Proyecto Bonita (RescueSync 1.5)
+├── docker-compose.yml
 ├── BONITA_WORKFLOW.md
+├── ENTREGA3.md        # Sistema Nacional (fuera de E2)
 └── IMPLEMENTACION.md
 ```

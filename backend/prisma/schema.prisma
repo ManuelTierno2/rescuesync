@@ -19,6 +19,15 @@ enum RolUsuario {
   @@map("rol_usuario")
 }
 
+enum OrganizacionTipo {
+  MUNICIPIO
+  CENTRO_COORDINADOR
+  ONG
+  AUDITORIA
+
+  @@map("organizacion_tipo")
+}
+
 enum Gravedad {
   BAJA
   MEDIA
@@ -35,36 +44,55 @@ enum TipoLote {
   @@map("tipo_lote")
 }
 
-model Usuario {
-  id           String       @id @default(uuid()) @db.Uuid
-  nombre       String       @db.VarChar(120)
-  email        String       @unique @db.VarChar(254)
-  rol          RolUsuario
-  organizacion String       @db.VarChar(150)
-  created_at   DateTime     @default(now()) @db.Timestamptz(3)
-  updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
-  emergencias  Emergencia[]
-  ofertas      Oferta[]
-  adjudicaciones Adjudicacion[]
-  participaciones ParticipacionOng[]
+model Organizacion {
+  id         String           @id @default(uuid()) @db.Uuid
+  nombre     String           @db.VarChar(150)
+  tipo       OrganizacionTipo
+  created_at DateTime         @default(now()) @db.Timestamptz(3)
+  updated_at DateTime         @default(now()) @updatedAt @db.Timestamptz(3)
+  usuarios   Usuario[]
 
+  @@map("organizaciones")
+}
+
+model Usuario {
+  id                   String            @id @default(uuid()) @db.Uuid
+  nombre               String            @db.VarChar(120)
+  email                String            @unique @db.VarChar(254)
+  password_hash        String?           @db.VarChar(100)
+  rol                  RolUsuario
+  organizacion         String            @db.VarChar(150)
+  organizacion_id      String?           @db.Uuid
+  created_at           DateTime          @default(now()) @db.Timestamptz(3)
+  updated_at           DateTime          @default(now()) @updatedAt @db.Timestamptz(3)
+  organizacion_ref     Organizacion?     @relation(fields: [organizacion_id], references: [id], onDelete: SetNull)
+  emergencias          Emergencia[]
+  ofertas              Oferta[]
+  adjudicaciones       Adjudicacion[]
+  participaciones      ParticipacionOng[]
+  inventarios          InventarioItem[]
+  consorcios_creados   Consorcio[]
+  consorcio_membresias ConsorcioMiembro[]
+  ofertas_historial    OfertaHistorial[]
+
+  @@index([organizacion_id])
   @@map("usuarios")
 }
 
 model Emergencia {
-  id                 String   @id @default(uuid()) @db.Uuid
-  creada_por_id      String   @db.Uuid
+  id                 String           @id @default(uuid()) @db.Uuid
+  creada_por_id      String           @db.Uuid
   gravedad           Gravedad
-  zona               String   @db.VarChar(200)
-  descripcion        String   @db.Text
-  bonita_instance_id BigInt?  @unique @db.BigInt
-  created_at         DateTime @default(now()) @db.Timestamptz(3)
-  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz(3)
-  creada_por         Usuario  @relation(fields: [creada_por_id], references: [id], onDelete: Restrict)
+  zona               String           @db.VarChar(200)
+  descripcion        String           @db.Text
+  bonita_instance_id BigInt?          @unique @db.BigInt
+  created_at         DateTime         @default(now()) @db.Timestamptz(3)
+  updated_at         DateTime         @default(now()) @updatedAt @db.Timestamptz(3)
+  creada_por         Usuario          @relation(fields: [creada_por_id], references: [id], onDelete: Restrict)
   lotes              Lote[]
   rondas             Ronda[]
   acciones           AccionWorkflow[]
-  cerrada_at         DateTime? @db.Timestamptz(3)
+  cerrada_at         DateTime?        @db.Timestamptz(3)
 
   @@index([creada_por_id])
   @@map("emergencias")
@@ -82,101 +110,173 @@ model Lote {
   updated_at         DateTime   @default(now()) @updatedAt @db.Timestamptz(3)
   emergencia         Emergencia @relation(fields: [emergencia_id], references: [id], onDelete: Restrict)
   ofertas            Oferta[]
-  ronda_id           String? @db.Uuid
-  ronda              Ronda? @relation(fields: [ronda_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  ronda_id           String?    @db.Uuid
+  ronda              Ronda?     @relation(fields: [ronda_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([emergencia_id])
   @@map("lotes")
 }
 
+model InventarioItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  ong_usuario_id String   @db.Uuid
+  tipo           TipoLote
+  descripcion    String   @db.Text
+  /// La migración SQL impone cantidad > 0.
+  cantidad       Int
+  unidad         String   @db.VarChar(50)
+  created_at     DateTime @default(now()) @db.Timestamptz(3)
+  updated_at     DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+  ong_usuario    Usuario  @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict)
+  ofertas        Oferta[]
+
+  @@index([ong_usuario_id])
+  @@map("inventario_items")
+}
+
+model Consorcio {
+  id            String            @id @default(uuid()) @db.Uuid
+  nombre        String            @db.VarChar(150)
+  creado_por_id String            @db.Uuid
+  created_at    DateTime          @default(now()) @db.Timestamptz(3)
+  updated_at    DateTime          @default(now()) @updatedAt @db.Timestamptz(3)
+  creado_por    Usuario           @relation(fields: [creado_por_id], references: [id], onDelete: Restrict)
+  miembros      ConsorcioMiembro[]
+  ofertas       Oferta[]
+
+  @@index([creado_por_id])
+  @@map("consorcios")
+}
+
+model ConsorcioMiembro {
+  id             String    @id @default(uuid()) @db.Uuid
+  consorcio_id   String    @db.Uuid
+  ong_usuario_id String    @db.Uuid
+  consorcio      Consorcio @relation(fields: [consorcio_id], references: [id], onDelete: Cascade)
+  ong_usuario    Usuario   @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict)
+
+  @@unique([consorcio_id, ong_usuario_id])
+  @@index([ong_usuario_id])
+  @@map("consorcio_miembros")
+}
+
 model Oferta {
-  id                String   @id @default(uuid()) @db.Uuid
-  lote_id           String   @db.Uuid
-  ong_usuario_id    String   @db.Uuid
+  id                 String           @id @default(uuid()) @db.Uuid
+  lote_id            String           @db.Uuid
+  ong_usuario_id     String           @db.Uuid
   /// La migración SQL impone cantidad_ofrecida > 0.
-  cantidad_ofrecida Int
-  observaciones     String?  @db.Text
-  created_at        DateTime @default(now()) @db.Timestamptz(3)
-  updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz(3)
-  lote              Lote     @relation(fields: [lote_id], references: [id], onDelete: Restrict)
-  ong_usuario       Usuario  @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict)
-  activa            Boolean @default(true)
-  adjudicacion      Adjudicacion?
+  cantidad_ofrecida  Int
+  observaciones      String?          @db.Text
+  version            Int              @default(1)
+  consorcio_id       String?          @db.Uuid
+  inventario_item_id String?          @db.Uuid
+  created_at         DateTime         @default(now()) @db.Timestamptz(3)
+  updated_at         DateTime         @default(now()) @updatedAt @db.Timestamptz(3)
+  lote               Lote             @relation(fields: [lote_id], references: [id], onDelete: Restrict)
+  ong_usuario        Usuario          @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict)
+  activa             Boolean          @default(true)
+  adjudicacion       Adjudicacion?
+  consorcio          Consorcio?       @relation(fields: [consorcio_id], references: [id], onDelete: SetNull)
+  inventario_item    InventarioItem?  @relation(fields: [inventario_item_id], references: [id], onDelete: SetNull)
+  historial          OfertaHistorial[]
 
   @@index([lote_id])
   @@index([ong_usuario_id])
+  @@index([consorcio_id])
+  @@index([inventario_item_id])
   @@map("ofertas")
 }
 
+model OfertaHistorial {
+  id                String   @id @default(uuid()) @db.Uuid
+  oferta_id         String   @db.Uuid
+  version           Int
+  cantidad_ofrecida Int
+  observaciones     String?  @db.Text
+  actor_id          String   @db.Uuid
+  created_at        DateTime @default(now()) @db.Timestamptz(3)
+  oferta            Oferta   @relation(fields: [oferta_id], references: [id], onDelete: Cascade)
+  actor             Usuario  @relation(fields: [actor_id], references: [id], onDelete: Restrict)
+
+  @@index([oferta_id])
+  @@index([actor_id])
+  @@map("ofertas_historial")
+}
+
 model Ronda {
-  id String @id @default(uuid()) @db.Uuid
-  emergencia_id String @db.Uuid
-  numero Int
-  tarea_lotes_id String? @db.VarChar(19)
-  publicada_at DateTime? @db.Timestamptz(3)
-  seleccionada_at DateTime? @db.Timestamptz(3)
-  ofertas_vistas_at DateTime? @db.Timestamptz(3)
-  monitoreo_finalizado_at DateTime? @db.Timestamptz(3)
-  created_at DateTime @default(now()) @db.Timestamptz(3)
-  emergencia Emergencia @relation(fields: [emergencia_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  lotes Lote[]
-  ventanas VentanaConvocatoria[]
-  participaciones ParticipacionOng[]
+  id                      String                @id @default(uuid()) @db.Uuid
+  emergencia_id           String                @db.Uuid
+  numero                  Int
+  tarea_lotes_id          String?               @db.VarChar(19)
+  publicada_at            DateTime?             @db.Timestamptz(3)
+  seleccionada_at         DateTime?             @db.Timestamptz(3)
+  ofertas_vistas_at       DateTime?             @db.Timestamptz(3)
+  monitoreo_finalizado_at DateTime?             @db.Timestamptz(3)
+  created_at              DateTime              @default(now()) @db.Timestamptz(3)
+  emergencia              Emergencia            @relation(fields: [emergencia_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lotes                   Lote[]
+  ventanas                VentanaConvocatoria[]
+  participaciones         ParticipacionOng[]
+
   @@unique([emergencia_id, numero])
   @@unique([emergencia_id, tarea_lotes_id])
   @@map("rondas")
 }
 
 model VentanaConvocatoria {
-  id String @id @default(uuid()) @db.Uuid
-  ronda_id String @db.Uuid
-  actividad_id String @unique @db.VarChar(80)
-  abierta_at DateTime @default(now()) @db.Timestamptz(3)
-  vence_at DateTime @db.Timestamptz(3)
-  cerrada_at DateTime? @db.Timestamptz(3)
-  cobertura Json?
-  ronda Ronda @relation(fields: [ronda_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id           String    @id @default(uuid()) @db.Uuid
+  ronda_id     String    @db.Uuid
+  actividad_id String    @unique @db.VarChar(80)
+  abierta_at   DateTime  @default(now()) @db.Timestamptz(3)
+  vence_at     DateTime  @db.Timestamptz(3)
+  cerrada_at   DateTime? @db.Timestamptz(3)
+  cobertura    Json?
+  ronda        Ronda     @relation(fields: [ronda_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
   @@index([ronda_id])
   @@map("ventanas_convocatoria")
 }
 
 model Adjudicacion {
-  id String @id @default(uuid()) @db.Uuid
-  oferta_id String @unique @db.Uuid
-  municipio_id String @db.Uuid
-  created_at DateTime @default(now()) @db.Timestamptz(3)
-  oferta Oferta @relation(fields: [oferta_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  municipio Usuario @relation(fields: [municipio_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id           String   @id @default(uuid()) @db.Uuid
+  oferta_id    String   @unique @db.Uuid
+  municipio_id String   @db.Uuid
+  created_at   DateTime @default(now()) @db.Timestamptz(3)
+  oferta       Oferta   @relation(fields: [oferta_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  municipio    Usuario  @relation(fields: [municipio_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
   @@map("adjudicaciones")
 }
 
 model ParticipacionOng {
-  id String @id @default(uuid()) @db.Uuid
-  ronda_id String @db.Uuid
-  ong_usuario_id String @db.Uuid
-  lectura_at DateTime? @db.Timestamptz(3)
-  finalizada_at DateTime? @db.Timestamptz(3)
-  ronda Ronda @relation(fields: [ronda_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  ong_usuario Usuario @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id             String    @id @default(uuid()) @db.Uuid
+  ronda_id       String    @db.Uuid
+  ong_usuario_id String    @db.Uuid
+  lectura_at     DateTime? @db.Timestamptz(3)
+  finalizada_at  DateTime? @db.Timestamptz(3)
+  ronda          Ronda     @relation(fields: [ronda_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ong_usuario    Usuario   @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
   @@unique([ronda_id, ong_usuario_id])
   @@map("participaciones_ong")
 }
 
 model AccionWorkflow {
-  id String @id @db.Uuid
-  emergencia_id String @db.Uuid
-  actor_id String @db.Uuid
-  accion String @db.VarChar(40)
-  task_id String? @unique @db.VarChar(19)
-  task_name String? @db.VarChar(100)
-  destinatario_id String? @db.Uuid
-  contrato Json
-  solicitud Json
-  estado String @default("PENDIENTE") @db.VarChar(20)
-  error_code String? @db.VarChar(80)
-  created_at DateTime @default(now()) @db.Timestamptz(3)
-  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(3)
-  emergencia Emergencia @relation(fields: [emergencia_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id              String     @id @db.Uuid
+  emergencia_id   String     @db.Uuid
+  actor_id        String     @db.Uuid
+  accion          String     @db.VarChar(40)
+  task_id         String?    @unique @db.VarChar(19)
+  task_name       String?    @db.VarChar(100)
+  destinatario_id String?    @db.Uuid
+  contrato        Json
+  solicitud       Json
+  estado          String     @default("PENDIENTE") @db.VarChar(20)
+  error_code      String?    @db.VarChar(80)
+  created_at      DateTime   @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime   @default(now()) @updatedAt @db.Timestamptz(3)
+  emergencia      Emergencia @relation(fields: [emergencia_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
   @@index([emergencia_id])
   @@map("acciones_workflow")
 }

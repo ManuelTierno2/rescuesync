@@ -1,7 +1,7 @@
 import { Link, useLocation, useParams } from 'react-router';
 import type { Emergencia, Lote, Warning } from '../api';
 import { useApiData } from '../hooks';
-import { useDevUser } from '../user-context';
+import { useDevUser } from '../auth-context';
 import { ErrorMessage, Loading, Success, formatDate } from '../ui';
 import { LoteForm } from '../components/LoteForm';
 import { LoteCard } from '../components/LoteCard';

@@ -15,7 +15,7 @@ async function main() {
     const server = createServer(createApp(prisma, createBonitaService(env.bonita), {
       compatibleProcessIds: env.BONITA_WORKFLOW_PROCESS_IDS.split(',').map(id => id.trim()).filter(Boolean),
       callbackSecret: env.BONITA_CALLBACK_SECRET, validationMode: env.OFERTAS_VALIDACION_MODE,
-    }));
+    }, 'http://localhost:5173', env.auth));
     server.listen(env.PORT);
     await once(server, 'listening');
     console.log(`RescueSync disponible en http://localhost:${env.PORT}`);

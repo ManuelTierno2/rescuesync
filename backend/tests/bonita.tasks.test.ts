@@ -7,11 +7,11 @@ describe('Human Tasks: protocolo y desambiguación', () => {
   it('pagina todas las tareas y filtra caseId, ready y nombre exacto sin IDs fijos', async () => {
     const stub = await bonitaServer();
     try {
-      for (let n = 0; n < 105; n++) stub.addTask('9', 'Visualizar notificacion', 'ong-' + n);
+      for (let n = 0; n < 105; n++) stub.addTask('9', 'Marcar actividad finalizada', 'ong-' + n);
       stub.addTask('10', 'Otra tarea');
       const client = createBonitaClient(stub.config);
       assert.equal((await client.listReadyHumanTasks('9')).length, 105);
-      const found = await client.findReadyHumanTask('9', 'Visualizar notificacion', 'ong-104');
+      const found = await client.findReadyHumanTask('9', 'Marcar actividad finalizada', 'ong-104');
       assert.equal(found?.id, stub.tasks[104]?.id);
       const searches = stub.requests.filter(r => r.path.includes('/humanTask?'));
       for (const search of searches) {
@@ -62,7 +62,7 @@ describe('Human Tasks: protocolo y desambiguación', () => {
   it('no roba tareas asignadas ni ejecuta la tarea de otra ONG', async () => {
     const stub = await bonitaServer();
     try {
-      const t = stub.addTask('9', 'Visualizar notificacion', 'ONG-A'); t.assigned_id = '123';
+      const t = stub.addTask('9', 'Marcar actividad finalizada', 'ONG-A'); t.assigned_id = '123';
       const client = createBonitaClient(stub.config);
       await assert.rejects(client.executeHumanTask(t.id, {}, { caseId: '9', name: t.name, recipient: 'ONG-A' }), { code: 'BONITA_TASK_ASSIGNED' });
       await assert.rejects(client.executeHumanTask(t.id, {}, { caseId: '9', name: t.name, recipient: 'ONG-B' }), { code: 'BONITA_TASK_MISMATCH' });

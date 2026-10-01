@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
 import type { Emergencia } from '../api';
 import { useApiData } from '../hooks';
-import { useDevUser } from '../user-context';
+import { useDevUser } from '../auth-context';
 import { ErrorMessage, Loading, formatDate } from '../ui';
 
 export function EmergenciasPage() {
@@ -26,7 +26,7 @@ export function EmergenciasPage() {
       {query.data?.length === 0 && (
         <div className="empty">
           <h2>Todavía no hay emergencias</h2>
-          <p>Seleccione un usuario municipal para registrar la primera.</p>
+          <p>Inicie sesión como municipio para registrar la primera.</p>
         </div>
       )}
       <div className="emergency-grid">

@@ -10,16 +10,18 @@ export interface WorkflowOptions {
 }
 export const defaultWorkflowOptions: WorkflowOptions = { compatibleProcessIds: [], validationMode: 'PENDIENTE', callbackSecret: '' };
 export const taskNames = {
-  registrar: 'Registrar emergencia', publicar: 'Generar y publicar lotes', decidir: 'Decidir curso accion',
-  'ver-ofertas': 'Visualizar ofertas validas', adjudicar: 'Seleccionar ofertas', leer: 'Visualizar notificacion',
-  'finalizar-actividad': 'Marcar actividad finalizada', 'finalizar-monitoreo': 'Monitorear despliegue', cerrar: 'Cerrar operativo',
+  registrar: 'Registrar emergencia', publicar: 'Generar y publicar lotes',
+  'ver-ofertas': 'ver-ofertas', adjudicar: 'adjudicar', leer: 'leer',
+  'finalizar-actividad': 'Marcar actividad finalizada', 'finalizar-monitoreo': 'Monitorear despliegue', cerrar: 'cerrar',
 } as const;
 export type Action = keyof typeof taskNames;
+/** Acciones solo PostgreSQL: no buscan ni completan tareas humanas Bonita. */
+export const localOnlyActions = new Set<Action>(['ver-ofertas', 'adjudicar', 'leer', 'cerrar']);
 const roles: Record<Action | 'nueva-ronda', string> = {
-  registrar: 'MUNICIPIO', publicar: 'COORDINADOR', decidir: 'COORDINADOR', 'ver-ofertas': 'MUNICIPIO',
+  registrar: 'MUNICIPIO', publicar: 'COORDINADOR', 'ver-ofertas': 'MUNICIPIO',
   adjudicar: 'MUNICIPIO', leer: 'ONG', 'finalizar-actividad': 'ONG', 'finalizar-monitoreo': 'COORDINADOR', cerrar: 'COORDINADOR', 'nueva-ronda': 'COORDINADOR',
 };
-export interface ActionInput { accionId: string; cursoAccion?: 'REABRIR' | 'REFORMULAR' | 'PARCIAL'; ofertaIds?: string[] }
+export interface ActionInput { accionId: string; ofertaIds?: string[] }
 interface ActionResult { data: AccionWorkflow; warnings?: { code: string; message: string }[] }
 function conflict(code: string, message: string): never { throw new AppError(409, code, message); }
 export function integrationWarning(error: unknown) {
@@ -100,30 +102,29 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
   }
   async function perform(emergenciaId: string, actorId: string, action: Action, input: ActionInput) {
     const e = await authorize(emergenciaId, actorId, action);
-    const solicitud = { cursoAccion: input.cursoAccion ?? null, ofertaIds: [...(input.ofertaIds ?? [])].sort() };
+    const solicitud = { ofertaIds: [...(input.ofertaIds ?? [])].sort() };
     const previous = await prisma.accionWorkflow.findUnique({ where: { id: input.accionId } });
     if (previous) {
-      const stored = previous.solicitud as { cursoAccion: string | null; ofertaIds: string[] };
+      const stored = previous.solicitud as { ofertaIds: string[] };
       if (previous.emergencia_id !== emergenciaId || previous.actor_id !== actorId || previous.accion !== action
-        || stored.cursoAccion !== solicitud.cursoAccion || JSON.stringify(stored.ofertaIds) !== JSON.stringify(solicitud.ofertaIds)) conflict('ACTION_ID_REUSED', 'El identificador ya pertenece a otra solicitud.');
+        || JSON.stringify(stored.ofertaIds ?? []) !== JSON.stringify(solicitud.ofertaIds)) conflict('ACTION_ID_REUSED', 'El identificador ya pertenece a otra solicitud.');
       return reconcile(emergenciaId, actorId, previous.id);
     }
     if (e.cerrada_at) conflict('EMERGENCIA_CERRADA', 'El operativo ya está cerrado.');
     let found: HumanTask | null = null;
     const recipient = ['leer', 'finalizar-actividad'].includes(action) ? actorId : undefined;
+    const localOnly = localOnlyActions.has(action);
     if (client) {
       if (!e.bonita_instance_id) conflict('BONITA_UNLINKED', 'La emergencia no tiene un caso vinculado. No se iniciará otro caso.');
-      if (action !== 'registrar') await requireCompatible(e.bonita_instance_id.toString());
-      found = await client.findReadyHumanTask(e.bonita_instance_id.toString(), taskNames[action], recipient);
-      if (!found) conflict('BONITA_TASK_NOT_FOUND', 'La tarea todavía no está disponible. Actualice Estado Bonita.');
-    } else if (action === 'decidir') conflict('BONITA_DISABLED', 'La decisión de routing requiere Bonita.');
-    let contrato: Record<string, unknown> = action === 'registrar' ? { emergenciaId } : action === 'decidir' ? { cursoAccion: input.cursoAccion } : {};
-    if (action === 'decidir' && !input.cursoAccion) throw new AppError(422, 'INVALID_DECISION', 'Seleccione un curso de acción.');
-    // Recipient contract is derived from PostgreSQL, never trusted from browser input.
-    if (action === 'adjudicar') {
-      const offers = await prisma.oferta.findMany({ where: { id: { in: input.ofertaIds ?? [] } }, select: { ong_usuario_id: true } });
-      if (client) contrato = { ongDestinatarios: [...new Set(offers.map(o => o.ong_usuario_id))].sort() };
+      // Local-only: no Bonita task lookup and no requireCompatible (cerrar puede ocurrir tras COMPLETED).
+      if (!localOnly) {
+        if (action !== 'registrar') await requireCompatible(e.bonita_instance_id.toString());
+        found = await client.findReadyHumanTask(e.bonita_instance_id.toString(), taskNames[action],
+          action === 'finalizar-actividad' ? recipient : undefined);
+        if (!found) conflict('BONITA_TASK_NOT_FOUND', 'La tarea todavía no está disponible. Actualice Estado Bonita.');
+      }
     }
+    const contrato: Record<string, unknown> = action === 'registrar' ? { emergenciaId } : {};
     if (found) await checkContract(found.id, contrato);
     const saved = await prisma.$transaction(async tx => {
       const locked = await lockEmergency(tx, emergenciaId);
@@ -159,7 +160,6 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
             if (sum > offer.lote.cantidad_requerida) throw new AppError(422, 'SELECTION_EXCEEDS_LOT', 'La selección supera la cantidad requerida de un lote.');
             totals.set(offer.lote_id, sum);
           }
-          if (client && JSON.stringify(contrato.ongDestinatarios) !== JSON.stringify([...new Set(offers.map(o => o.ong_usuario_id))].sort())) conflict('SELECTION_CHANGED', 'La selección cambió. Actualice los datos.');
           await tx.adjudicacion.createMany({ data: ids.map(oferta_id => ({ oferta_id, municipio_id: actorId })) });
           await tx.participacionOng.createMany({ data: [...new Set(offers.map(o => o.ong_usuario_id))].map(ong_usuario_id => ({ ronda_id: round.id, ong_usuario_id })) });
           await tx.ronda.update({ where: { id: round.id }, data: { seleccionada_at: now } });
@@ -183,9 +183,10 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
           conflict('CLOSURE_PENDING', 'Deben finalizar el monitoreo y todas las actividades ONG.');
         await tx.emergencia.update({ where: { id: emergenciaId }, data: { cerrada_at: now } });
       }
+      // Local-only actions confirm immediately (task_id null). Bonita sync only when a ready task was claimed.
       return tx.accionWorkflow.create({ data: { id: input.accionId, emergencia_id: emergenciaId, actor_id: actorId, accion: action,
         task_id: found?.id, task_name: found?.name, destinatario_id: recipient, contrato: contrato as Prisma.InputJsonObject,
-        solicitud, estado: client ? 'PENDIENTE' : 'CONFIRMADO' } });
+        solicitud, estado: found ? 'PENDIENTE' : 'CONFIRMADO' } });
     });
     return finish(saved);
   }
@@ -218,11 +219,17 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
         data.compatible = !!state.processId && options.compatibleProcessIds.includes(state.processId) && !!options.callbackSecret;
         if (state.state === 'OPEN') {
           data.readyTasks = await client.listReadyHumanTasks(e.bonita_instance_id.toString());
-          for (const task of data.readyTasks) if ([taskNames.leer, taskNames['finalizar-actividad']].includes(task.name as never)) {
+          for (const task of data.readyTasks) if (task.name === taskNames['finalizar-actividad']) {
             try { task.ongUsuarioId = String(await client.getActivityVariable(task.id, 'ongUsuarioId')); }
             catch (error) { warnings.push(integrationWarning(error)); }
           }
-          data.availableActions = Object.entries(taskNames).filter(([key, name]) => (data.compatible || key === 'registrar') && data.readyTasks.some(t => t.name === name)).map(([key]) => key);
+          data.availableActions = Object.entries(taskNames)
+            .filter(([key, name]) => !localOnlyActions.has(key as Action) && (data.compatible || key === 'registrar')
+              && data.readyTasks.some(t => t.name === name)).map(([key]) => key);
+          if (data.compatible) {
+            data.availableActions.push('leer', 'cerrar');
+            if (options.validationMode === 'DESARROLLO') data.availableActions.push('ver-ofertas', 'adjudicar');
+          }
           if (data.compatible && round?.publicada_at && data.readyTasks.some(t => t.name === taskNames.publicar && t.id !== round.tarea_lotes_id)) data.availableActions.push('nueva-ronda');
           if (!data.compatible) warnings.push({ code: 'BPMN_INCOMPATIBLE', message: 'Los tramos posteriores al registro requieren verificar y desplegar los cambios manuales de Studio.' });
         }
