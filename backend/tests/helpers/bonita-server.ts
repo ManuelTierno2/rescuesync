@@ -10,6 +10,8 @@ export interface StubOptions {
   missingCookie?: 'JSESSIONID' | 'X-Bonita-API-Token'; onStart?: () => Promise<void>;
   taskStatus?: number; executionStatus?: number; delayTaskMs?: number; delayExecutionMs?: number;
   searchOverride?: unknown[]; contractOverride?: unknown; onExecution?: (task: StubTask) => Promise<void>;
+  alternativeDecision?: boolean;
+  monitorRecipientsContract?: boolean;
 }
 export interface StubTask { id: string; caseId: string; name: string; state: string; assigned_id: string; ongUsuarioId?: string }
 let sequence = 100n;
@@ -29,14 +31,14 @@ export async function bonitaServer(options: StubOptions = {}) {
   function expire(caseId: string, covered: boolean, recipients?: string[]) {
     for (const t of tasks.filter(t => t.caseId === caseId && t.name === 'Cargar o editar ofertas')) t.state = 'aborted';
     if (!covered) {
-      addTask(caseId, 'Generar y publicar lotes');
+      addTask(caseId, options.alternativeDecision ? 'Evaluar curso alternativo' : 'Generar y publicar lotes');
       return;
     }
     const c = cases.get(caseId) ?? { processId: PROCESS_ID, completed: false, recipients: [] };
     if (!cases.has(caseId)) cases.set(caseId, c);
     if (recipients) c.recipients = recipients;
     addTask(caseId, 'Monitorear despliegue');
-    for (const r of c.recipients) addTask(caseId, 'Marcar actividad finalizada', r);
+    if (!options.monitorRecipientsContract) for (const r of c.recipients) addTask(caseId, 'Marcar actividad finalizada', r);
   }
   function advance(task: StubTask, values: Record<string, unknown>) {
     task.state = 'completed'; archivedTasks.push({ ...task, id: String(++sequence), sourceObjectId: task.id });
@@ -45,7 +47,18 @@ export async function bonitaServer(options: StubOptions = {}) {
     switch (task.name) {
       case 'Registrar emergencia': add('Generar y publicar lotes'); break;
       case 'Generar y publicar lotes': add('Cargar o editar ofertas'); break;
-      case 'Monitorear despliegue': case 'Marcar actividad finalizada':
+      case 'Evaluar curso alternativo':
+        if (values.decisionCurso === 'REABRIR') add('Cargar o editar ofertas');
+        else if (values.decisionCurso === 'REFORMULAR') add('Generar y publicar lotes');
+        else add('Monitorear despliegue');
+        break;
+      case 'Monitorear despliegue':
+        if (options.monitorRecipientsContract) {
+          c.recipients = values.ongDestinatariosInput as string[];
+          for (const r of c.recipients) add('Marcar actividad finalizada', r);
+        }
+        // fall through: un caso termina después de todas las actividades finales.
+      case 'Marcar actividad finalizada':
         if (!tasks.some(t => t.caseId === task.caseId && ['Monitorear despliegue', 'Marcar actividad finalizada'].includes(t.name) && t.state === 'ready'))
           c.completed = true;
         break;
@@ -110,14 +123,22 @@ export async function bonitaServer(options: StubOptions = {}) {
         if (!task) { res.writeHead(404).end('{}'); return; }
         const sub = parts[6];
         if (sub === 'contract') {
-          const name = task.name === 'Registrar emergencia' ? 'emergenciaId' : null;
-          res.end(JSON.stringify(options.contractOverride ?? { inputs: name ? [{ name, type: 'TEXT', multiple: false }] : [] }));
+          const name = task.name === 'Registrar emergencia' ? 'emergenciaId' : task.name === 'Evaluar curso alternativo' ? 'decisionCurso' : null;
+          const inputs = task.name === 'Monitorear despliegue' && options.monitorRecipientsContract
+            ? [{ name: 'ongDestinatariosInput', type: 'TEXT', multiple: true }]
+            : name ? [{ name, type: 'TEXT', multiple: false }] : [];
+          res.end(JSON.stringify(options.contractOverride ?? { inputs }));
         } else if (sub === 'context') res.end('{}');
         else if (sub === 'execution') {
           if (task.state !== 'ready') { res.writeHead(409).end('{}'); return; }
           if (options.executionStatus && options.executionStatus !== 204) { res.writeHead(options.executionStatus).end('{}'); return; }
           const values = JSON.parse(body) as Record<string, unknown>;
           if (task.name === 'Registrar emergencia' && typeof values.emergenciaId !== 'string') { res.writeHead(400).end('{}'); return; }
+          if (task.name === 'Evaluar curso alternativo' && !['CONTINUAR_PARCIAL', 'REABRIR', 'REFORMULAR'].includes(String(values.decisionCurso))) { res.writeHead(400).end('{}'); return; }
+          if (task.name === 'Monitorear despliegue' && options.monitorRecipientsContract &&
+            (!Array.isArray(values.ongDestinatariosInput) || !values.ongDestinatariosInput.length || !values.ongDestinatariosInput.every(v => typeof v === 'string'))) {
+            res.writeHead(400).end('{}'); return;
+          }
           await options.onExecution?.(task);
           advance(task, values);
           if (options.delayExecutionMs) await setTimeout(options.delayExecutionMs);

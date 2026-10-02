@@ -1,4 +1,5 @@
 ﻿import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { Prisma, PrismaClient, AccionWorkflow } from '../generated/prisma/client.js';
 import { AppError } from '../errors/app-error.js';
 import { BonitaError, type HumanTask } from '../integrations/bonita/bonita.client.js';
@@ -11,6 +12,7 @@ export interface WorkflowOptions {
 export const defaultWorkflowOptions: WorkflowOptions = { compatibleProcessIds: [], validationMode: 'PENDIENTE', callbackSecret: '' };
 export const taskNames = {
   registrar: 'Registrar emergencia', publicar: 'Generar y publicar lotes',
+  decidir: 'Evaluar curso alternativo',
   'ver-ofertas': 'ver-ofertas', adjudicar: 'adjudicar', leer: 'leer',
   'finalizar-actividad': 'Marcar actividad finalizada', 'finalizar-monitoreo': 'Monitorear despliegue', cerrar: 'cerrar',
 } as const;
@@ -18,10 +20,12 @@ export type Action = keyof typeof taskNames;
 /** Acciones solo PostgreSQL: no buscan ni completan tareas humanas Bonita. */
 export const localOnlyActions = new Set<Action>(['ver-ofertas', 'adjudicar', 'leer', 'cerrar']);
 const roles: Record<Action | 'nueva-ronda', string> = {
+  decidir: 'COORDINADOR',
   registrar: 'MUNICIPIO', publicar: 'COORDINADOR', 'ver-ofertas': 'MUNICIPIO',
   adjudicar: 'MUNICIPIO', leer: 'ONG', 'finalizar-actividad': 'ONG', 'finalizar-monitoreo': 'COORDINADOR', cerrar: 'COORDINADOR', 'nueva-ronda': 'COORDINADOR',
 };
-export interface ActionInput { accionId: string; ofertaIds?: string[] }
+export const courseDecisions = ['CONTINUAR_PARCIAL', 'REABRIR', 'REFORMULAR'] as const;
+export interface ActionInput { accionId: string; ofertaIds?: string[]; decisionCurso?: typeof courseDecisions[number] }
 interface ActionResult { data: AccionWorkflow; warnings?: { code: string; message: string }[] }
 function conflict(code: string, message: string): never { throw new AppError(409, code, message); }
 export function integrationWarning(error: unknown) {
@@ -60,6 +64,17 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
       if (input.type !== 'TEXT' || (input.multiple ? !Array.isArray(v) || !v.every(x => typeof x === 'string') : typeof v !== 'string'))
         throw new BonitaError('BPMN_CONTRACT_INCOMPATIBLE', 'El tipo del contrato desplegado es incompatible.');
     }
+  }
+  async function selectionPermitted(roundId: string, emergenciaId: string, db: Prisma.TransactionClient = prisma) {
+    if (!client) return true;
+    const window = await db.ventanaConvocatoria.findFirst({ where: { ronda_id: roundId }, orderBy: { abierta_at: 'desc' } });
+    if (!window?.cerrada_at || !window.cobertura) return false;
+    const coverage = window.cobertura as { lotesCubiertos?: boolean };
+    if (coverage.lotesCubiertos === true) return true;
+    return !!await db.accionWorkflow.findFirst({ where: {
+      emergencia_id: emergenciaId, accion: 'decidir', estado: 'CONFIRMADO',
+      created_at: { gte: window.cerrada_at }, contrato: { path: ['decisionCurso'], equals: 'CONTINUAR_PARCIAL' },
+    } });
   }
   async function finish(action: AccionWorkflow): Promise<ActionResult> {
     if (!client || !action.task_id || !action.task_name) return { data: action };
@@ -102,11 +117,12 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
   }
   async function perform(emergenciaId: string, actorId: string, action: Action, input: ActionInput) {
     const e = await authorize(emergenciaId, actorId, action);
-    const solicitud = { ofertaIds: [...(input.ofertaIds ?? [])].sort() };
+    const solicitud = { ofertaIds: [...(input.ofertaIds ?? [])].sort(), ...(action === 'decidir' ? { decisionCurso: input.decisionCurso } : {}) };
     const previous = await prisma.accionWorkflow.findUnique({ where: { id: input.accionId } });
     if (previous) {
-      const stored = previous.solicitud as { ofertaIds: string[] };
+      const stored = previous.solicitud as { ofertaIds: string[]; decisionCurso?: string };
       if (previous.emergencia_id !== emergenciaId || previous.actor_id !== actorId || previous.accion !== action
+        || stored.decisionCurso !== solicitud.decisionCurso
         || JSON.stringify(stored.ofertaIds ?? []) !== JSON.stringify(solicitud.ofertaIds)) conflict('ACTION_ID_REUSED', 'El identificador ya pertenece a otra solicitud.');
       return reconcile(emergenciaId, actorId, previous.id);
     }
@@ -114,9 +130,20 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
     let found: HumanTask | null = null;
     const recipient = ['leer', 'finalizar-actividad'].includes(action) ? actorId : undefined;
     const localOnly = localOnlyActions.has(action);
+    if (action === 'decidir' && (!client || !input.decisionCurso || !courseDecisions.includes(input.decisionCurso)))
+      conflict('DECISION_UNAVAILABLE', 'La decisión requiere una tarea de evaluación en Bonita y una opción válida.');
     if (client) {
       if (!e.bonita_instance_id) conflict('BONITA_UNLINKED', 'La emergencia no tiene un caso vinculado. No se iniciará otro caso.');
-      // Local-only: no Bonita task lookup and no requireCompatible (cerrar puede ocurrir tras COMPLETED).
+      // La selección se guarda localmente, pero debe respetar la reformulación del motor.
+      if (action === 'ver-ofertas' || action === 'adjudicar') {
+        await requireCompatible(e.bonita_instance_id.toString());
+        if (await client.findReadyHumanTask(e.bonita_instance_id.toString(), taskNames.publicar))
+          conflict('ROUND_REFORMULATION_REQUIRED', 'Bonita está en Generar y publicar lotes. El coordinador debe preparar y publicar la nueva ronda antes de adjudicar.');
+        const tasks = await client.listReadyHumanTasks(e.bonita_instance_id.toString());
+        if (tasks.some(t => [taskNames.decidir, 'Cargar o editar ofertas'].includes(t.name)))
+          conflict('SELECTION_NOT_READY', 'La convocatoria o la decisión del coordinador todavía está pendiente.');
+      }
+      // cerrar puede ocurrir tras COMPLETED; las acciones locales no ejecutan tareas Bonita.
       if (!localOnly) {
         if (action !== 'registrar') await requireCompatible(e.bonita_instance_id.toString());
         found = await client.findReadyHumanTask(e.bonita_instance_id.toString(), taskNames[action],
@@ -124,7 +151,19 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
         if (!found) conflict('BONITA_TASK_NOT_FOUND', 'La tarea todavía no está disponible. Actualice Estado Bonita.');
       }
     }
-    const contrato: Record<string, unknown> = action === 'registrar' ? { emergenciaId } : {};
+    const contrato: Record<string, unknown> = action === 'registrar' ? { emergenciaId }
+      : action === 'decidir' ? { decisionCurso: input.decisionCurso } : {};
+    if (found && action === 'finalizar-monitoreo') {
+      const contract = await client!.getTaskContract(found.id) as { inputs?: { name: string }[] };
+      if (contract?.inputs?.some(i => i.name === 'ongDestinatariosInput')) {
+        const round = await prisma.ronda.findFirst({ where: { emergencia_id: emergenciaId }, orderBy: { numero: 'desc' },
+          include: { participaciones: { select: { ong_usuario_id: true } } } });
+        if (!round?.seleccionada_at) conflict('SELECTION_PENDING', 'Falta confirmar la adjudicación.');
+        const recipients = [...new Set(round.participaciones.map(p => p.ong_usuario_id))].sort();
+        if (!recipients.length) conflict('NO_AWARD', 'No hay ONG adjudicadas para crear las tareas finales.');
+        contrato.ongDestinatariosInput = recipients;
+      }
+    }
     if (found) await checkContract(found.id, contrato);
     const saved = await prisma.$transaction(async tx => {
       const locked = await lockEmergency(tx, emergenciaId);
@@ -134,6 +173,15 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
       if (found && await tx.accionWorkflow.findUnique({ where: { task_id: found.id } })) conflict('TASK_ALREADY_SUBMITTED', 'Esta tarea ya tiene una acción registrada. Consulte o reconcilie esa acción.');
       const round = await currentRound(tx, emergenciaId);
       const now = new Date();
+      if (action === 'decidir') {
+        const window = await tx.ventanaConvocatoria.findFirst({ where: { ronda_id: round.id }, orderBy: { abierta_at: 'desc' } });
+        if (!round.publicada_at || round.seleccionada_at || !window?.cerrada_at || !window.cobertura)
+          conflict('DECISION_NOT_READY', 'Primero debe finalizar la evaluación de la convocatoria vigente.');
+        const coverage = window.cobertura as { lotesCubiertos?: boolean; lotes?: { cantidadOfrecida: number }[] };
+        if (coverage.lotesCubiertos !== false) conflict('DECISION_NOT_REQUIRED', 'La ronda ya tiene cobertura completa.');
+        if (input.decisionCurso === 'CONTINUAR_PARCIAL' && !coverage.lotes?.some(l => l.cantidadOfrecida > 0))
+          conflict('NO_OFFERS', 'No hay ofertas para continuar con cobertura parcial.');
+      }
       if (action === 'publicar') {
         if (round.publicada_at) conflict('ROUND_ALREADY_PUBLISHED', 'La ronda ya fue publicada. Cree la nueva ronda cuando Bonita habilite reformulación.');
         if (!await tx.lote.count({ where: { ronda_id: round.id } })) conflict('NO_LOTES', 'Debe existir al menos un lote.');
@@ -144,6 +192,8 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
       if (action === 'ver-ofertas' || action === 'adjudicar') {
         if (options.validationMode !== 'DESARROLLO') conflict('VALIDACION_PENDIENTE', 'La validación externa está pendiente. El modo de desarrollo debe habilitarse explícitamente.');
         if (!round.publicada_at) conflict('ROUND_NOT_PUBLISHED', 'Primero debe publicarse la convocatoria.');
+        if (!await selectionPermitted(round.id, emergenciaId, tx))
+          conflict('SELECTION_NOT_READY', 'Falta evaluar la cobertura o confirmar la decisión de continuar parcialmente.');
         if (action === 'ver-ofertas') {
           if (round.ofertas_vistas_at) conflict('ALREADY_VIEWED', 'Ya se confirmó la visualización.');
           await tx.ronda.update({ where: { id: round.id }, data: { ofertas_vistas_at: now } });
@@ -228,9 +278,14 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
               && data.readyTasks.some(t => t.name === name)).map(([key]) => key);
           if (data.compatible) {
             data.availableActions.push('leer', 'cerrar');
-            if (options.validationMode === 'DESARROLLO') data.availableActions.push('ver-ofertas', 'adjudicar');
+            if (options.validationMode === 'DESARROLLO' && round && await selectionPermitted(round.id, emergenciaId)
+              && !data.readyTasks.some(t => [taskNames.publicar, taskNames.decidir, 'Cargar o editar ofertas'].includes(t.name)))
+              data.availableActions.push('ver-ofertas', 'adjudicar');
           }
-          if (data.compatible && round?.publicada_at && data.readyTasks.some(t => t.name === taskNames.publicar && t.id !== round.tarea_lotes_id)) data.availableActions.push('nueva-ronda');
+          if (data.compatible && data.readyTasks.some(t => t.name === taskNames.decidir)) data.availableActions = ['decidir'];
+          if (data.compatible && round?.publicada_at && data.readyTasks.some(t => t.name === taskNames.publicar && t.id !== round.tarea_lotes_id)) {
+            data.availableActions = ['nueva-ronda'];
+          }
           if (!data.compatible) warnings.push({ code: 'BPMN_INCOMPATIBLE', message: 'Los tramos posteriores al registro requieren verificar y desplegar los cambios manuales de Studio.' });
         }
       } catch (error) { warnings.push(integrationWarning(error)); }
@@ -253,6 +308,15 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
     if (recorded && kind === 'abrir') { const { ronda: _round, ...window } = recorded; return { data: window }; }
     if (recorded?.cobertura && kind === 'evaluar') return { data: recorded.cobertura };
     await requireCompatible(input.caseId);
+    // The boundary timer starts before the opening callback reaches the API.
+    // Wait out a small offset without shortening the window or holding a DB lock.
+    if (kind === 'evaluar' && recorded) {
+      const remaining = recorded.vence_at.getTime() - Date.now();
+      if (remaining > 0 && remaining <= 2000) {
+        while (recorded.vence_at.getTime() > Date.now())
+          await delay(recorded.vence_at.getTime() - Date.now());
+      }
+    }
     return prisma.$transaction(async tx => {
       const locked = await lockEmergency(tx, emergenciaId);
       if (locked.cerrada_at) conflict('EMERGENCIA_CERRADA', 'El operativo está cerrado.');
@@ -263,6 +327,7 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
         if (previous) return { data: previous };
         if (!round.publicada_at || round.seleccionada_at) conflict('INVALID_WINDOW', 'La ronda no admite convocatoria.');
         if (await tx.ventanaConvocatoria.count({ where: { ronda_id: round.id, cerrada_at: null } })) conflict('WINDOW_ALREADY_OPEN', 'La ronda ya tiene una ventana abierta.');
+        await tx.ronda.update({ where: { id: round.id }, data: { ofertas_vistas_at: null } });
         const duration = input.duracionMs ?? 3600000;
         return { data: await tx.ventanaConvocatoria.create({ data: { ronda_id: round.id, actividad_id: input.actividadId,
           vence_at: new Date(Date.now() + duration) } }) };

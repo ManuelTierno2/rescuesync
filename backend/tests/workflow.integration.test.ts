@@ -60,6 +60,42 @@ async function fixture(enabled = true, options: StubOptions = {}, compatible = t
 }
 
 describe('Workflow, PostgreSQL y motor Bonita falso', () => {
+  it('1.6 envía solo las ONG adjudicadas, sin duplicados, al terminar el monitoreo', async () => {
+    const f = await fixture(true, { alternativeDecision: true, monitorRecipientsContract: true });
+    try {
+      const l1 = await f.lote(); const l2 = await f.lote();
+      await f.post('publicar').expect(200); const window = await f.open();
+      const a1 = (await f.oferta(l1.id, A, 4).expect(201)).body.data;
+      const a2 = (await f.oferta(l2.id, A, 4).expect(201)).body.data;
+      await f.oferta(l1.id, B, 2).expect(201);
+      await f.expire(window);
+      await f.post('decidir', C, { decisionCurso: 'CONTINUAR_PARCIAL' }).expect(200);
+      await f.post('finalizar-monitoreo').expect(409);
+      await f.post('ver-ofertas', M).expect(200);
+      await f.post('adjudicar', M, { ofertaIds: [a1.id, a2.id] }).expect(200);
+      assert.equal(f.stub.tasks.filter(t => t.name === 'Marcar actividad finalizada').length, 0);
+      await f.post('finalizar-monitoreo', C, { ongDestinatariosInput: [B] }).expect(400);
+      f.stub.options.delayExecutionMs = 650;
+      const monitor = await f.post('finalizar-monitoreo').expect(200);
+      assert.equal(monitor.body.data.estado, 'DESCONOCIDO');
+      assert.deepEqual(monitor.body.data.contrato, { ongDestinatariosInput: [A] });
+      const reconciled = await request(f.app).post(`/api/emergencias/${f.id}/acciones/${monitor.body.data.id}/reconciliar`)
+        .set('X-Dev-User-Id', C).send({}).expect(200);
+      assert.equal(reconciled.body.data.estado, 'CONFIRMADO');
+      const executions = f.stub.requests.filter(r => r.path.includes(`/${monitor.body.data.task_id}/execution?`));
+      assert.equal(executions.length, 1);
+      assert.deepEqual(JSON.parse(executions[0]!.body), { ongDestinatariosInput: [A] });
+      const tasks = f.stub.tasks.filter(t => t.name === 'Marcar actividad finalizada' && t.state === 'ready');
+      assert.deepEqual(tasks.map(t => t.ongUsuarioId), [A]);
+      f.stub.options.delayExecutionMs = 0;
+      await f.post('leer', B).expect(403);
+      await f.post('leer', A).expect(200);
+      await f.post('finalizar-actividad', A).expect(200);
+      await f.post('cerrar').expect(200);
+      const state = (await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data;
+      assert.equal(state.state, 'COMPLETED');
+    } finally { await f.stub.close(); }
+  });
   for (const monitorFirst of [true, false]) it(`recorrido completo con dos ONG y monitoreo ${monitorFirst ? 'antes' : 'después'} de actividades`, async () => {
     const f = await fixture();
     try {
@@ -113,10 +149,19 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
     const f = await fixture();
     try {
       const l = await f.lote(); await f.post('publicar').expect(200); const first = await f.open();
-      await f.oferta(l.id, A, 3).expect(201);
+      const offer = (await f.oferta(l.id, A, 3).expect(201)).body.data;
       const coverage = await f.expire(first);
       assert.equal(coverage.lotesCubiertos, false);
       assert.equal(f.stub.tasks.find(t => t.state === 'ready')?.name, 'Generar y publicar lotes');
+      const workflow = (await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data;
+      assert.deepEqual(workflow.availableActions, ['nueva-ronda']);
+      for (const action of ['ver-ofertas', 'adjudicar']) {
+        const blocked = await f.post(action, M, action === 'adjudicar' ? { ofertaIds: [offer.id] } : {}).expect(409);
+        assert.equal(blocked.body.error.code, 'ROUND_REFORMULATION_REQUIRED');
+      }
+      const oldRound = await prisma.ronda.findFirstOrThrow({ where: { emergencia_id: f.id } });
+      assert.equal(oldRound.ofertas_vistas_at, null);
+      assert.equal(oldRound.seleccionada_at, null);
       const response = await request(f.app).post(`/api/emergencias/${f.id}/acciones/nueva-ronda`).set('X-Dev-User-Id', C).send({}).expect(200);
       assert.equal(response.body.data.numero, 2);
       await request(f.app).post(`/api/emergencias/${f.id}/acciones/nueva-ronda`).set('X-Dev-User-Id', C).send({}).expect(200);
@@ -129,16 +174,14 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
       assert.equal(f.stub.requests.filter(r => r.path.endsWith('/instantiation')).length, 1);
     } finally { await f.stub.close(); }
   });
-  it('permite adjudicar menos de lo requerido y rechaza excedentes e inactivas', async () => {
-    const f = await fixture();
+  it('sin Bonita permite adjudicar menos de lo requerido y rechaza excedentes e inactivas', async () => {
+    const f = await fixture(false);
     try {
-      const l = await f.lote(); await f.post('publicar').expect(200); const window = await f.open();
+      const l = await f.lote(); await f.post('publicar').expect(200);
       const a = (await f.oferta(l.id, A, 4).expect(201)).body.data;
       const b = (await f.oferta(l.id, B, 8).expect(201)).body.data;
       await prisma.oferta.update({ where: { id: b.id }, data: { activa: false } });
-      assert.equal((await f.expire(window, [A])).lotesCubiertos, false);
-      assert.equal(f.stub.tasks.find(t => t.state === 'ready')?.name, 'Generar y publicar lotes');
-      // Cobertura falsa no habilita adjudicación Bonita; con DESARROLLO las acciones locales siguen disponibles.
+      assert.equal((await calculateCoverage(prisma, f.id)).lotesCubiertos, false);
       await f.post('ver-ofertas', M).expect(200);
       await f.post('adjudicar', M, { ofertaIds: [b.id] }).expect(422);
       await prisma.oferta.update({ where: { id: b.id }, data: { activa: true } });
@@ -147,6 +190,69 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
       await f.post('adjudicar', M, { ofertaIds: [randomUUID()] }).expect(422);
       await f.post('adjudicar', M, { ofertaIds: [a.id] }).expect(200);
       await f.post('leer', B).expect(403);
+    } finally { await f.stub.close(); }
+  });
+  for (const decisionCurso of ['CONTINUAR_PARCIAL', 'REABRIR', 'REFORMULAR']) it(`decisión 1.6: ${decisionCurso}`, async () => {
+    const f = await fixture(true, { alternativeDecision: true });
+    try {
+      const lot = await f.lote(); await f.post('publicar').expect(200); const first = await f.open();
+      const offer = (await f.oferta(lot.id, A, 4).expect(201)).body.data;
+      await f.post('ver-ofertas', M).expect(409);
+      await f.expire(first);
+      const state = (await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data;
+      assert.deepEqual(state.availableActions, ['decidir']);
+      await f.post('ver-ofertas', M).expect(409);
+      await f.post('adjudicar', M, { ofertaIds: [offer.id] }).expect(409);
+      await f.post('decidir', M, { decisionCurso }).expect(403);
+      await f.post('decidir', C, { decisionCurso: 'INVALIDA' }).expect(400);
+      const chosen = await f.post('decidir', C, { decisionCurso }).expect(200);
+      assert.deepEqual(chosen.body.data.contrato, { decisionCurso });
+      const repeat = await f.post('decidir', C, { decisionCurso, accionId: chosen.body.data.id }).expect(200);
+      assert.equal(repeat.body.data.id, chosen.body.data.id);
+      await f.post('decidir', C, { decisionCurso: decisionCurso === 'REABRIR' ? 'REFORMULAR' : 'REABRIR', accionId: chosen.body.data.id }).expect(409);
+      const after = (await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data;
+      if (decisionCurso === 'CONTINUAR_PARCIAL') {
+        assert.ok(after.availableActions.includes('adjudicar'));
+        await f.post('ver-ofertas', M).expect(200);
+        await f.post('adjudicar', M, { ofertaIds: [offer.id] }).expect(200);
+      } else if (decisionCurso === 'REABRIR') {
+        assert.ok(!after.availableActions.includes('adjudicar'));
+        await f.post('ver-ofertas', M).expect(409);
+        const second = await f.open();
+        assert.notEqual(first, second);
+        assert.equal(await prisma.ronda.count({ where: { emergencia_id: f.id } }), 1);
+        assert.equal(await prisma.lote.count({ where: { emergencia_id: f.id } }), 1);
+        assert.equal(await prisma.oferta.count({ where: { lote_id: lot.id } }), 1);
+        await f.oferta(lot.id, B, 6).expect(201);
+        const coverage = await f.expire(second, [A, B]);
+        assert.equal(coverage.lotesCubiertos, true);
+        const oldCoverage = await f.callback('evaluar', first).expect(200);
+        assert.equal(oldCoverage.body.data.lotesCubiertos, false);
+        assert.equal(oldCoverage.body.data.lotes[0].cantidadOfrecida, 4);
+        await f.post('ver-ofertas', M).expect(200);
+      } else {
+        assert.deepEqual(after.availableActions, ['nueva-ronda']);
+        await request(f.app).post(`/api/emergencias/${f.id}/acciones/nueva-ronda`).set('X-Dev-User-Id', C).send({}).expect(200);
+        assert.equal(await prisma.ronda.count({ where: { emergencia_id: f.id } }), 2);
+        assert.equal(await prisma.oferta.count({ where: { lote_id: lot.id } }), 1);
+        await f.lote(6); await f.post('publicar').expect(200); await f.open();
+      }
+      assert.equal(f.stub.requests.filter(r => r.path.includes(`/${chosen.body.data.task_id}/execution?`)).length, 1);
+    } finally { await f.stub.close(); }
+  });
+  it('no acepta cobertura parcial sin ofertas y reconcilia una decisión con timeout sin repetirla', async () => {
+    const f = await fixture(true, { alternativeDecision: true });
+    try {
+      await f.lote(); await f.post('publicar').expect(200); const first = await f.open(); await f.expire(first);
+      const empty = await f.post('decidir', C, { decisionCurso: 'CONTINUAR_PARCIAL' }).expect(409);
+      assert.equal(empty.body.error.code, 'NO_OFFERS');
+      f.stub.options.delayExecutionMs = 650;
+      const chosen = await f.post('decidir', C, { decisionCurso: 'REABRIR' }).expect(200);
+      assert.equal(chosen.body.data.estado, 'DESCONOCIDO');
+      const retried = await request(f.app).post(`/api/emergencias/${f.id}/acciones/${chosen.body.data.id}/reconciliar`)
+        .set('X-Dev-User-Id', C).send({}).expect(200);
+      assert.equal(retried.body.data.estado, 'CONFIRMADO');
+      assert.equal(f.stub.requests.filter(r => r.path.includes(`/${chosen.body.data.task_id}/execution?`)).length, 1);
     } finally { await f.stub.close(); }
   });
   it('fallo después de guardar conserva datos y reconcilia la tarea exacta sin otra ejecución', async () => {
@@ -217,7 +323,7 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
       const task = f.stub.tasks.find(t => t.name === 'Cargar o editar ofertas')!;
       await request(f.app).post(`/api/internal/bonita/emergencias/${f.id}/convocatoria/abrir`).send({ caseId: f.caseId, actividadId: task.id, duracionMs: 1000 }).expect(401);
       await f.callback('abrir', task.id, { caseId: '1', duracionMs: 1000 }).expect(403);
-      await f.callback('abrir', task.id, { duracionMs: 1000 }).expect(200);
+      await f.callback('abrir', task.id, { duracionMs: 10000 }).expect(200);
       await f.callback('evaluar', task.id).expect(409);
       const stranger = await prisma.usuario.create({ data: { nombre: 'Municipio ajeno', email: randomUUID() + '@test.local', rol: 'MUNICIPIO', organizacion: 'Otro' } });
       try { await f.post('ver-ofertas', stranger.id).expect(403); } finally { await prisma.usuario.delete({ where: { id: stranger.id } }); }
@@ -236,12 +342,27 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
       assert.deepEqual((await f.callback('evaluar', activityId).expect(200)).body.data, evaluated.body.data);
     } finally { await f.stub.close(); }
   });
+  it('espera el pequeño desfase del timer antes de evaluar sin cerrar anticipadamente', async () => {
+    const f = await fixture();
+    try {
+      const l = await f.lote(); await f.post('publicar').expect(200); const activityId = await f.open();
+      await f.oferta(l.id, A, 10).expect(201);
+      const deadline = new Date(Date.now() + 500);
+      await prisma.ventanaConvocatoria.update({ where: { actividad_id: activityId }, data: { vence_at: deadline } });
+      const evaluated = await f.callback('evaluar', activityId).expect(200);
+      const window = await prisma.ventanaConvocatoria.findUniqueOrThrow({ where: { actividad_id: activityId } });
+      assert.ok(window.cerrada_at!.getTime() >= deadline.getTime());
+      assert.equal(evaluated.body.data.lotesCubiertos, true);
+      assert.deepEqual((await f.callback('evaluar', activityId).expect(200)).body.data, evaluated.body.data);
+    } finally { await f.stub.close(); }
+  });
   it('modo desacoplado realiza operaciones locales sin ninguna llamada HTTP Bonita', async () => {
     const f = await fixture(false);
     try {
       const l = await f.lote(); await f.post('publicar').expect(200);
       const a = (await f.oferta(l.id, A, 3).expect(201)).body.data;
-      await f.post('decidir', C, { cursoAccion: 'PARCIAL' }).expect(404);
+      await f.post('decidir', C, { cursoAccion: 'PARCIAL' }).expect(400);
+      await f.post('decidir', C, { decisionCurso: 'CONTINUAR_PARCIAL' }).expect(409);
       await f.post('ver-ofertas', M).expect(200);
       await f.post('adjudicar', M, { ofertaIds: [a.id] }).expect(200);
       await f.post('leer', B).expect(403);

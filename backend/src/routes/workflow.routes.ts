@@ -5,7 +5,7 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import type { BonitaService } from '../integrations/bonita/bonita.service.js';
 import { isBonitaId } from '../integrations/bonita/bonita.client.js';
 import { AppError } from '../errors/app-error.js';
-import { createWorkflowService, taskNames, type Action, type ActionInput, type WorkflowOptions } from '../services/workflow.service.js';
+import { createWorkflowService, taskNames, courseDecisions, type Action, type ActionInput, type WorkflowOptions } from '../services/workflow.service.js';
 import { calculateCoverage } from '../services/workflow-data.js';
 import { createAuthMiddleware, resolveActorId } from '../middlewares/auth.js';
 import type { AuthConfig } from '../config/env.js';
@@ -39,6 +39,7 @@ export function createWorkflowRouter(prisma: PrismaClient, bonita: BonitaService
   for (const action of Object.keys(taskNames) as Action[]) {
     const schema = z.object({ accionId: uuid,
       ...(action === 'adjudicar' ? { ofertaIds: z.array(uuid).min(1).max(1000) } : {}),
+      ...(action === 'decidir' ? { decisionCurso: z.enum(courseDecisions) } : {}),
     }).strict();
     router.post('/acciones/' + action, requireAuth, async (req, res) => {
       res.json(await service.perform(res.locals.emergenciaId, await resolveActorId(req, authConfig), action, parse(schema, req.body) as ActionInput));
