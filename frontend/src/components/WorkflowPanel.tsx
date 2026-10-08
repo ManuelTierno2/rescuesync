@@ -9,10 +9,18 @@ const labels: Record<string, string> = {
   'ver-ofertas': 'Continuar a selección', adjudicar: 'Confirmar adjudicación', leer: 'Confirmar lectura',
   'finalizar-actividad': 'Marcar actividad finalizada', 'finalizar-monitoreo': 'Finalizar monitoreo / continuar cierre',
   cerrar: 'Cerrar operativo', 'nueva-ronda': 'Preparar nueva ronda',
+  'continuar-parcial': 'Continuar con cobertura parcial', reabrir: 'Reabrir convocatoria', reformular: 'Reformular lotes',
+};
+const decisions: Record<string, string> = { 'continuar-parcial': 'CONTINUAR_PARCIAL', reabrir: 'REABRIR', reformular: 'REFORMULAR' };
+const decisionDetails: Record<string, string> = {
+  'continuar-parcial': 'Se aceptan los faltantes y se habilita al municipio a seleccionar las ofertas disponibles.',
+  reabrir: 'Se conservan los lotes y las ofertas existentes y se abre un nuevo plazo para completarlas o editarlas.',
+  reformular: 'Se vuelve a preparar una nueva ronda de lotes. La ronda y las ofertas anteriores quedan en el historial.',
 };
 const roles: Record<string, string> = { registrar: 'MUNICIPIO', publicar: 'COORDINADOR',
   'ver-ofertas': 'MUNICIPIO', adjudicar: 'MUNICIPIO', leer: 'ONG', 'finalizar-actividad': 'ONG',
-  'finalizar-monitoreo': 'COORDINADOR', cerrar: 'COORDINADOR', 'nueva-ronda': 'COORDINADOR' };
+  'finalizar-monitoreo': 'COORDINADOR', cerrar: 'COORDINADOR', 'nueva-ronda': 'COORDINADOR',
+  'continuar-parcial': 'COORDINADOR', reabrir: 'COORDINADOR', reformular: 'COORDINADOR' };
 export function WorkflowPanel({ id, query, onChanged }: { id: string; query: ReturnType<typeof useWorkflow>; onChanged: () => void }) {
   const { user } = useDevUser();
   const { data, monitoring } = query;
@@ -24,16 +32,20 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
   const [warnings, setWarnings] = useState<Warning[]>([]);
   const requestId = useRef<string | undefined>(undefined);
   const busy = useRef(false);
-  useEffect(() => { setSelection([]); setConfirm(undefined); requestId.current = undefined; }, [data?.round?.id, user?.id]);
+  const needsNewRound = !!data?.availableActions.includes('nueva-ronda');
+  const needsDecision = !!data?.availableActions.includes('decidir');
+  const readyTaskIds = data?.readyTasks.map(t => t.id).join(',');
+  useEffect(() => { setSelection([]); setConfirm(undefined); setFeedback(''); requestId.current = undefined; }, [data?.round?.id, user?.id, readyTaskIds]);
   if (!data) return <section className="card"><h2>Estado Bonita</h2><ErrorMessage error={query.error} retry={query.refresh} /><p>Consultando estado…</p></section>;
   const round = monitoring?.rondas.find(r => r.id === data.round?.id);
   const myParticipation = round?.participaciones.find(p => p.ong_usuario_id === user?.id);
   const lots = round?.lotes ?? [];
   const overflow = lots.some(l => l.ofertas.filter(o => selection.includes(o.id)).reduce((n, o) => n + o.cantidad_ofrecida, 0) > l.cantidad_requerida);
-  const available = (action: string) => data.availableActions.includes(action) && roles[action] === user?.rol && !query.error
+  const available = (action: string) => data.availableActions.includes(decisions[action] ? 'decidir' : action) && roles[action] === user?.rol && !query.error
     && (user?.rol !== 'MUNICIPIO' || monitoring?.emergencia.creada_por_id === user.id);
   function allowed(action: string) {
     if (data!.localClosed) return false;
+    if (action === 'continuar-parcial') return lots.some(l => l.ofertas.some(o => o.activa && o.cantidad_ofrecida > 0));
     if (action === 'publicar') return !!lots.length && !round?.publicada_at;
     if (action === 'ver-ofertas') return !!round?.publicada_at && !round.ofertas_vistas_at && data!.validationMode === 'DESARROLLO';
     if (action === 'adjudicar') return !!round?.ofertas_vistas_at && !round.seleccionada_at && !!selection.length && !overflow && data!.validationMode === 'DESARROLLO';
@@ -52,8 +64,9 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
     try {
       requestId.current ??= crypto.randomUUID();
       const body = reconcileId || action === 'nueva-ronda' ? {} : { accionId: requestId.current,
+        ...(decisions[action] ? { decisionCurso: decisions[action] } : {}),
         ...(action === 'adjudicar' ? { ofertaIds: selection } : {}) };
-      const result = await api(`/emergencias/${id}/acciones/${reconcileId ? reconcileId + '/reconciliar' : action}`, { body });
+      const result = await api(`/emergencias/${id}/acciones/${reconcileId ? reconcileId + '/reconciliar' : decisions[action] ? 'decidir' : action}`, { body });
       setWarnings(result.warnings ?? []); setFeedback(result.warnings?.length ? 'Datos guardados; sincronización pendiente.' : 'Acción confirmada.');
       setConfirm(undefined); requestId.current = undefined; onChanged();
     } catch (e) { setError(e); query.refresh(); }
@@ -64,12 +77,15 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
       <div className="section-heading"><h2>Estado Bonita</h2><button type="button" onClick={query.refresh}>Actualizar estado</button></div>
       <p>Caso: <strong>{data.caseId ? '#' + data.caseId : 'Sin caso vinculado'}</strong> · {data.enabled ? data.state : 'Bonita deshabilitado'}</p>
       <p>Tareas actuales: {data.readyTasks.length ? data.readyTasks.map(t => `${t.name} (#${t.id})`).join(' · ') : 'Sin tareas humanas disponibles'}</p>
-      <p>Ronda {data.round?.numero ?? 1} · {data.localClosed ? 'Cierre local confirmado' : data.round?.publicada_at ? 'Publicada' : 'En preparación'}</p>
+      <p>Ronda {data.round?.numero ?? 1} · {data.localClosed ? 'Cierre local confirmado' : needsDecision ? 'Pendiente de decisión del coordinador' : needsNewRound ? 'Pendiente de reformulación' : data.round?.publicada_at ? 'Publicada' : 'En preparación'}</p>
+      {needsNewRound && <p className="notice warning">Bonita volvió a Generar y publicar lotes. La ronda anterior ya no admite adjudicación. {user?.rol === 'COORDINADOR'
+        ? 'Elegí Preparar nueva ronda, cargá los lotes y publicá la convocatoria. Las ofertas anteriores se conservan en el historial.'
+        : 'El coordinador debe preparar una nueva ronda. Ingresá con la cuenta de coordinador para continuar.'}</p>}
       {data.enabled && data.localClosed && data.state !== 'COMPLETED' && <p className="notice warning">El cierre está guardado localmente; falta confirmar el archivo del caso en Bonita.</p>}
       {!data.enabled && <p className="muted">Operaciones locales. Los timers de convocatoria requieren Bonita.</p>}
       <ErrorMessage error={query.error} retry={query.refresh} />
       {query.warnings.map((w, i) => <p className="notice warning" key={i}>{w.message}</p>)}
-      {data.windows.filter(w => !w.cerrada_at).map(w => <p key={w.id}>Ventana: {data.enabled ? 'vence ' + formatDate(w.vence_at) : 'abierta hasta confirmar adjudicación'}</p>)}
+      {data.windows.filter(w => !w.cerrada_at).map(w => <p key={w.id}>Ventana: {data.enabled ? (new Date(w.vence_at).getTime() <= Date.now() ? 'vencida el ' : 'vence ') + formatDate(w.vence_at) : 'abierta hasta confirmar adjudicación'}</p>)}
     </section>
     <section className="card" aria-label="Acciones del operativo">
       <h2>Acciones del operativo</h2>
@@ -77,7 +93,15 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
       <ErrorMessage error={error} />
       {feedback && <p role="status">{feedback}</p>}
       {warnings.map((w, i) => <p className="notice warning" role="alert" key={i}>{w.message}</p>)}
-      {user?.rol === 'MUNICIPIO' && round?.publicada_at && <div className="selection-list">
+      {needsDecision && <div>
+        <h3>Evaluar curso alternativo</h3>
+        <p>La convocatoria terminó sin cubrir todos los lotes. El coordinador debe elegir cómo continuar.</p>
+        <ul>{lots.map(l => {
+          const offered = l.ofertas.filter(o => o.activa).reduce((sum, o) => sum + o.cantidad_ofrecida, 0);
+          return <li key={l.id}>{l.descripcion}: {offered} / {l.cantidad_requerida} {l.unidad} ofrecidas · Faltan {Math.max(0, l.cantidad_requerida - offered)}</li>;
+        })}</ul>
+      </div>}
+      {available('adjudicar') && round?.publicada_at && <div className="selection-list">
         <h3>Ofertas disponibles / selección</h3>
         {lots.map(l => <div key={l.id}><h4>{l.descripcion}</h4>
           <p>Seleccionadas: {l.ofertas.filter(o => selection.includes(o.id)).reduce((n, o) => n + o.cantidad_ofrecida, 0)} / {l.cantidad_requerida} {l.unidad}</p>
@@ -97,13 +121,14 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
       </div>}
       <div className="workflow-buttons">{Object.keys(labels).filter(available).map(action => <button type="button" key={action}
         disabled={pending || !!confirm || !allowed(action)} onClick={() => { setConfirm(action); setError(undefined); requestId.current = undefined; }}>{labels[action]}</button>)}</div>
-      {confirm && <div className="notice confirmation" role="group" aria-label="Confirmar acción">
+      {confirm && available(confirm) && <div className="notice confirmation" role="group" aria-label="Confirmar acción">
         <p>Confirmar: {labels[confirm]}.</p>
+        {decisionDetails[confirm] && <p>{decisionDetails[confirm]}</p>}
         <button type="button" disabled={pending} onClick={() => void send(confirm)}>{pending ? 'Guardando…' : 'Confirmar acción'}</button>{' '}
         <button type="button" disabled={pending} onClick={() => { setConfirm(undefined); requestId.current = undefined; }}>Cancelar</button>
       </div>}
       {data.actions.filter(a => a.actor_id === user?.id && a.estado !== 'CONFIRMADO').map(a => <div className="notice warning" key={a.id}>
-        <p>{labels[a.accion]} · {a.estado} · Tarea #{a.task_id}</p>
+        <p>{a.accion === 'decidir' ? 'Evaluar curso alternativo' : labels[a.accion]} · {a.estado} · Tarea #{a.task_id}</p>
         <button type="button" disabled={pending} onClick={() => void send(a.accion, a.id)}>Consultar / reconciliar acción</button>
       </div>)}
     </section>
