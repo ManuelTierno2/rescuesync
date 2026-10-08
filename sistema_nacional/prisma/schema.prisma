@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Rol {
+  ADMIN
+  ONG
+}
+
+enum EstadoOng {
+  PENDIENTE
+  HABILITADA
+  SUSPENDIDA
+}
+
+enum NivelRiesgo {
+  BAJO
+  MEDIO
+  ALTO
+  CRITICO
+}
+
+enum EstadoCompromiso {
+  ACTIVO
+  LIBERADO
+}
+
+// Cuenta de login. ADMIN = cuenta de servicio de la plataforma (Bonita / backend local); ONG = ligada a una Ong.
+model Usuario {
+  id           Int    @id @default(autoincrement())
+  email        String @unique
+  passwordHash String
+  rol          Rol
+  ongId        Int?   @unique
+  ong          Ong?   @relation(fields: [ongId], references: [id])
+}
+
+model Ong {
+  id              Int                @id @default(autoincrement())
+  nombre          String
+  cuit            String             @unique
+  estado          EstadoOng          @default(PENDIENTE)
+  createdAt       DateTime           @default(now())
+  usuario         Usuario?
+  certificaciones OngCertificacion[]
+  recursos        OngRecurso[]
+  compromisos     Compromiso[]
+}
+
+model TipoRecurso {
+  id              Int              @id @default(autoincrement())
+  codigo          String           @unique // PARAMEDICO, RACION_ALIMENTO...
+  unidad          String
+  certificaciones Certificacion[]
+  ongRecursos     OngRecurso[]
+  items           CompromisoItem[]
+}
+
+model Certificacion {
+  id             Int                @id @default(autoincrement())
+  codigo         String             @unique
+  nombre         String
+  tipoRecursoId  Int
+  tipoRecurso    TipoRecurso        @relation(fields: [tipoRecursoId], references: [id])
+  nivelRiesgoMax NivelRiesgo
+  ongs           OngCertificacion[]
+}
+
+model OngCertificacion {
+  ongId           Int
+  certificacionId Int
+  vencimiento     DateTime?
+  ong             Ong           @relation(fields: [ongId], references: [id])
+  certificacion   Certificacion @relation(fields: [certificacionId], references: [id])
+
+  @@id([ongId, certificacionId])
+}
+
+// Disponible = total - bloqueado. CHECK (bloqueado BETWEEN 0 AND total) va en la migración.
+model OngRecurso {
+  id            Int         @id @default(autoincrement())
+  ongId         Int
+  tipoRecursoId Int
+  total         Int
+  bloqueado     Int         @default(0)
+  ong           Ong         @relation(fields: [ongId], references: [id])
+  tipoRecurso   TipoRecurso @relation(fields: [tipoRecursoId], references: [id])
+
+  @@unique([ongId, tipoRecursoId])
+}
+
+model Compromiso {
+  id           Int              @id @default(autoincrement())
+  emergenciaId String // id de la instancia/emergencia en Bonita
+  loteId       String
+  ongId        Int
+  estado       EstadoCompromiso @default(ACTIVO)
+  createdAt    DateTime         @default(now())
+  liberadoAt   DateTime?
+  ong          Ong              @relation(fields: [ongId], references: [id])
+  items        CompromisoItem[]
+
+  @@unique([emergenciaId, loteId, ongId]) // idempotencia ante reintentos
+  @@index([emergenciaId])
+}
+
+model CompromisoItem {
+  id            Int         @id @default(autoincrement())
+  compromisoId  Int
+  tipoRecursoId Int
+  cantidad      Int
+  compromiso    Compromiso  @relation(fields: [compromisoId], references: [id])
+  tipoRecurso   TipoRecurso @relation(fields: [tipoRecursoId], references: [id])
+}

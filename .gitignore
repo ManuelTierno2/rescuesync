@@ -11,3 +11,9 @@ node_modules/
 **/.DS_Store
 backend/.env
 frontend/.env
+Guia_RescueSync_Etapa2_Despliegue_y_Prueba.pdf
+Trabajo integrador 2026.pdf
+Entrega 1 - DSSD.pdf
+sistema_nacional/.env
+sistema_nacional/dist/
+sistema_nacional/src/generated/
