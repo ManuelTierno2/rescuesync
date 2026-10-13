@@ -9,7 +9,7 @@ Plataforma para coordinar respuesta ante desastres: municipios, centro coordinad
 | Sistema Nacional (API base: health/login) | `sistema_nacional/` | http://localhost:3002 (configurar `.env`) |
 | Proceso Bonita | `app/` | Studio / http://localhost:8080/bonita |
 
-Documentación: [backend/README.md](backend/README.md), [frontend/README.md](frontend/README.md), [BONITA_WORKFLOW.md](BONITA_WORKFLOW.md), [IMPLEMENTACION.md](IMPLEMENTACION.md), [ENTREGA3.md](ENTREGA3.md) (Sistema Nacional, fuera de E2).
+Documentación: [backend/README.md](backend/README.md), [frontend/README.md](frontend/README.md), [BONITA_WORKFLOW.md](BONITA_WORKFLOW.md), [BONITA_USUARIOS_LOCAL.md](BONITA_USUARIOS_LOCAL.md) (3 usuarios Bonita por actor), [IMPLEMENTACION.md](IMPLEMENTACION.md), [ENTREGA3.md](ENTREGA3.md) (Sistema Nacional, fuera de E2).
 
 Guía actual de arranque conjunto, pruebas y límites de la integración nacional:
 [PRUEBAS_INTEGRACION.md](PRUEBAS_INTEGRACION.md). El Sistema Nacional todavía no
@@ -111,8 +111,9 @@ Abrí **http://localhost:5173**.
 | `TEST_DATABASE_URL` | Postgres solo para tests (nombre debe terminar en `_test`) | `…/rescuesync_test` |
 | `BONITA_ENABLED` | Integra con Bonita | `false` / `true` |
 | `BONITA_URL` | Base URL del motor | `http://localhost:8080/bonita` |
-| `BONITA_USERNAME` | Usuario técnico Bonita | (vacío si disabled) |
-| `BONITA_PASSWORD` | Password Bonita | (vacío si disabled) |
+| `BONITA_USER_MUNICIPIO` / `BONITA_PASS_MUNICIPIO` | Usuario Bonita actor Municipio | `rs.municipio` |
+| `BONITA_USER_COORDINADOR` / `BONITA_PASS_COORDINADOR` | Usuario Bonita actor CentroCoordinador | `rs.coordinador` |
+| `BONITA_USER_ONG` / `BONITA_PASS_ONG` | Usuario Bonita actor ONG | `rs.ong` |
 | `BONITA_PROCESS_ID` | ID de la definición **RescueSync** desplegada | decimal positivo |
 | `BONITA_TIMEOUT_MS` | Timeout llamadas Bonita (1–60000) | `10000` |
 | `BONITA_WORKFLOW_PROCESS_IDS` | IDs de definiciones habilitadas para el workflow completo; vacío bloquea tramos nuevos | (vacío) |
@@ -122,7 +123,7 @@ Abrí **http://localhost:5173**.
 | `JWT_EXPIRES_IN` | Expiración del token | `8h` |
 | `AUTH_ALLOW_DEV_HEADER` | Acepta `X-Dev-User-Id` (solo tests/dev) | `false` (en test, default true) |
 
-Con `BONITA_ENABLED=false` no hace falta completar el resto de variables Bonita.
+Con `BONITA_ENABLED=false` no hace falta completar el resto de variables Bonita. Con `true`, configurar los **tres** pares de credenciales (ya no existe un único `BONITA_USERNAME`).
 
 ### Frontend (`frontend/.env`)
 

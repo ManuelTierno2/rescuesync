@@ -76,13 +76,17 @@ La configuración está exclusivamente en `backend/.env`:
 ```dotenv
 BONITA_ENABLED=false
 BONITA_URL=http://localhost:8080/bonita
-BONITA_USERNAME=
-BONITA_PASSWORD=
+BONITA_USER_MUNICIPIO=rs.municipio
+BONITA_PASS_MUNICIPIO=
+BONITA_USER_COORDINADOR=rs.coordinador
+BONITA_PASS_COORDINADOR=
+BONITA_USER_ONG=rs.ong
+BONITA_PASS_ONG=
 BONITA_PROCESS_ID=
 BONITA_TIMEOUT_MS=10000
 ```
 
-Con `false` el flujo funciona sin Bonita. Con `true`, el backend guarda la emergencia, autentica su conexión con Bonita Community 2025.2, inicia RescueSync y guarda el `caseId`. El usuario técnico debe existir en Bonita y poder iniciar la definición desplegada elegida. Obtener su ID en la administración del motor o mediante la consulta REST documentada en el [README del backend](../backend/README.md#bonita-community-20252-conexión-e-inicio-real).
+Con `false` el flujo funciona sin Bonita. Con `true`, el backend usa **tres usuarios Bonita** (uno por actor); ver [BONITA_USUARIOS_LOCAL.md](../BONITA_USUARIOS_LOCAL.md).
 
 El detalle muestra el identificador de instancia o **Sin vínculo registrado**. Si la integración falla después del guardado, el alta sigue siendo exitosa y el detalle muestra una advertencia. **No repetir el alta**: ante timeout la instancia podría existir. Las advertencias vienen de la respuesta del alta y no son un historial persistido.
 

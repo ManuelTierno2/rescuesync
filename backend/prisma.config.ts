@@ -1,5 +1,6 @@
+import 'dotenv/config';
 import { defineConfig } from 'prisma/config';
-import { readEnv } from './src/config/env.js';
+import { databaseUrlSchema } from './src/config/env.js';
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',
@@ -7,5 +8,6 @@ export default defineConfig({
     path: 'prisma/migrations',
     seed: 'tsx prisma/seed.ts',
   },
-  datasource: { url: readEnv().DATABASE_URL },
+  // Prisma solo necesita la URL; no validar credenciales Bonita en migrate/seed.
+  datasource: { url: databaseUrlSchema.parse(process.env.DATABASE_URL) },
 });

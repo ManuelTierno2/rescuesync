@@ -38,8 +38,12 @@ const bonitaSchema = z.object({
       return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
     } catch { return false; }
   }).default('http://localhost:8080/bonita'),
-  BONITA_USERNAME: z.string().trim().min(1),
-  BONITA_PASSWORD: z.string().min(1),
+  BONITA_USER_MUNICIPIO: z.string().trim().min(1),
+  BONITA_PASS_MUNICIPIO: z.string().min(1),
+  BONITA_USER_COORDINADOR: z.string().trim().min(1),
+  BONITA_PASS_COORDINADOR: z.string().min(1),
+  BONITA_USER_ONG: z.string().trim().min(1),
+  BONITA_PASS_ONG: z.string().min(1),
   BONITA_PROCESS_ID: z.string().refine(isBonitaId),
   BONITA_TIMEOUT_MS: z.coerce.number().int().min(1).max(60000).default(10000),
 });
@@ -64,8 +68,14 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env) {
       throw new EnvError(fields);
     }
     bonita = {
-      enabled: true, url: settings.data.BONITA_URL, username: settings.data.BONITA_USERNAME,
-      password: settings.data.BONITA_PASSWORD, processId: settings.data.BONITA_PROCESS_ID,
+      enabled: true,
+      url: settings.data.BONITA_URL,
+      credentials: {
+        municipio: { username: settings.data.BONITA_USER_MUNICIPIO, password: settings.data.BONITA_PASS_MUNICIPIO },
+        coordinador: { username: settings.data.BONITA_USER_COORDINADOR, password: settings.data.BONITA_PASS_COORDINADOR },
+        ong: { username: settings.data.BONITA_USER_ONG, password: settings.data.BONITA_PASS_ONG },
+      },
+      processId: settings.data.BONITA_PROCESS_ID,
       timeoutMs: settings.data.BONITA_TIMEOUT_MS,
     };
   }

@@ -1,6 +1,33 @@
-﻿export type BonitaConfig = { enabled: false } | {
-  enabled: true; url: string; username: string; password: string; processId: string; timeoutMs: number;
+﻿export type BonitaActor = 'municipio' | 'coordinador' | 'ong';
+export const BONITA_ACTORS = ['municipio', 'coordinador', 'ong'] as const satisfies readonly BonitaActor[];
+
+export type BonitaCredentials = Record<BonitaActor, { username: string; password: string }>;
+
+export type BonitaConfig = { enabled: false } | {
+  enabled: true;
+  url: string;
+  credentials: BonitaCredentials;
+  processId: string;
+  timeoutMs: number;
 };
+
+/** Actor Bonita que debe ejecutar cada human task (alineado al mapping 1:1). */
+export function actorForTaskName(name: string): BonitaActor {
+  switch (name) {
+    case 'Registrar emergencia':
+      return 'municipio';
+    case 'Generar y publicar lotes':
+    case 'Evaluar curso alternativo':
+    case 'Monitorear despliegue':
+      return 'coordinador';
+    case 'Cargar o editar ofertas':
+    case 'Marcar actividad finalizada':
+      return 'ong';
+    default:
+      return 'municipio';
+  }
+}
+
 export class BonitaError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = 'BonitaError'; }
 }
@@ -21,9 +48,11 @@ function id(value: unknown): string {
 export interface HumanTask { id: string; name: string; caseId: string; state: string; assigned_id: string }
 export interface CaseState { state: 'OPEN' | 'COMPLETED' | 'UNKNOWN'; processId?: string }
 type Send = (path: string, options?: RequestInit, accepted?: number[]) => Promise<Response>;
+
 export function createBonitaClient(config: Extract<BonitaConfig, { enabled: true }>) {
   const base = config.url.replace(/\/+$/, '');
-  async function session<T>(operation: (send: Send) => Promise<T>): Promise<T> {
+  async function session<T>(actor: BonitaActor, operation: (send: Send) => Promise<T>): Promise<T> {
+    const { username, password } = config.credentials[actor];
     const cookies = new Map<string, string>();
     const signal = AbortSignal.timeout(config.timeoutMs);
     let authenticated = false;
@@ -48,7 +77,7 @@ export function createBonitaClient(config: Extract<BonitaConfig, { enabled: true
     };
     try {
       const login = await raw('/loginservice', { method: 'POST', body: new URLSearchParams({
-        username: config.username, password: config.password, redirect: 'false',
+        username, password, redirect: 'false',
       }) });
       await login.body?.cancel(); authenticated = login.status === 204;
       if (!authenticated || !cookies.has('JSESSIONID') || !cookies.has('X-Bonita-API-Token'))
@@ -126,7 +155,7 @@ export function createBonitaClient(config: Extract<BonitaConfig, { enabled: true
   async function startProcess(): Promise<string> {
     let stage = 'process';
     try {
-      return await session(async send => {
+      return await session('municipio', async send => {
         let definition: unknown;
         try { definition = await json(send, `/API/bpm/process/${config.processId}`); }
         catch (e) { if (e instanceof BonitaError) throw new BonitaError('BONITA_PROCESS_UNAVAILABLE', 'La emergencia se guardó, pero no se pudo consultar RescueSync.'); throw e; }
@@ -151,20 +180,35 @@ export function createBonitaClient(config: Extract<BonitaConfig, { enabled: true
       throw e;
     }
   }
+  async function listReadyHumanTasks(caseId: string): Promise<HumanTask[]> {
+    id(caseId);
+    const byId = new Map<string, HumanTask>();
+    for (const actor of BONITA_ACTORS) {
+      const tasks = await session(actor, send => ready(send, caseId));
+      for (const t of tasks) byId.set(t.id, t);
+    }
+    return [...byId.values()];
+  }
   return {
     startProcess,
-    listReadyHumanTasks: (caseId: string) => session(send => ready(send, caseId)),
-    findReadyHumanTask: (caseId: string, name: string, recipient?: string) => session(send => find(send, caseId, name, recipient)),
-    getTaskContract: (taskId: string) => session(send => json(send, `/API/bpm/userTask/${id(taskId)}/contract`)),
-    getTaskContext: (taskId: string) => session(send => json(send, `/API/bpm/userTask/${id(taskId)}/context`)),
-    getActivityVariable: (taskId: string, name: string) => session(send => variable(send, taskId, name)),
-    executeHumanTask: (taskId: string, values: Record<string, unknown>, expected: { caseId: string; name: string; recipient?: string }) => session(send => execute(send, taskId, values, expected)),
-    completeTaskByName: (caseId: string, name: string, values: Record<string, unknown> = {}, recipient?: string) => session(async send => {
-      const found = await find(send, caseId, name, recipient);
-      if (!found) throw new BonitaError('BONITA_TASK_NOT_FOUND', 'La tarea todavía no está disponible.');
-      await execute(send, found.id, values, { caseId, name, recipient }); return found;
-    }),
-    getCaseState: (caseId: string): Promise<CaseState> => session(async send => {
+    listReadyHumanTasks,
+    findReadyHumanTask: (caseId: string, name: string, recipient?: string) =>
+      session(actorForTaskName(name), send => find(send, caseId, name, recipient)),
+    getTaskContract: (taskId: string, actor: BonitaActor) =>
+      session(actor, send => json(send, `/API/bpm/userTask/${id(taskId)}/contract`)),
+    getTaskContext: (taskId: string, actor: BonitaActor) =>
+      session(actor, send => json(send, `/API/bpm/userTask/${id(taskId)}/context`)),
+    getActivityVariable: (taskId: string, name: string, actor: BonitaActor = 'ong') =>
+      session(actor, send => variable(send, taskId, name)),
+    executeHumanTask: (taskId: string, values: Record<string, unknown>, expected: { caseId: string; name: string; recipient?: string }) =>
+      session(actorForTaskName(expected.name), send => execute(send, taskId, values, expected)),
+    completeTaskByName: (caseId: string, name: string, values: Record<string, unknown> = {}, recipient?: string) =>
+      session(actorForTaskName(name), async send => {
+        const found = await find(send, caseId, name, recipient);
+        if (!found) throw new BonitaError('BONITA_TASK_NOT_FOUND', 'La tarea todavía no está disponible.');
+        await execute(send, found.id, values, { caseId, name, recipient }); return found;
+      }),
+    getCaseState: (caseId: string): Promise<CaseState> => session('municipio', async send => {
       const response = await send(`/API/bpm/case/${id(caseId)}`, {}, [200, 404]);
       if (response.status === 200) {
         const value = parseJson(await response.text());
@@ -175,7 +219,7 @@ export function createBonitaClient(config: Extract<BonitaConfig, { enabled: true
       const archived = await search(send, 'archivedCase', [`sourceObjectId=${caseId}`]);
       return { state: archived.some(v => record(v) && v.sourceObjectId === caseId && v.state === 'completed') ? 'COMPLETED' : 'UNKNOWN' };
     }),
-    isTaskCompleted: (caseId: string, taskId: string) => session(async send => {
+    isTaskCompleted: (caseId: string, taskId: string) => session('municipio', async send => {
       const archived = await search(send, 'archivedHumanTask', [`caseId=${id(caseId)}`, `sourceObjectId=${id(taskId)}`]);
       return archived.some(v => record(v) && v.sourceObjectId === taskId && v.caseId === caseId && v.state === 'completed');
     }),

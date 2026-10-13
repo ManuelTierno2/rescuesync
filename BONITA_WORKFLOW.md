@@ -148,18 +148,28 @@ El conector `Evaluar cobertura`, en `Validacion de ofertas`, mapea `data.lotesCu
 
 ## Actores Bonita vs roles app
 
-| Actor Bonita | Rol app |
-|---|---|
-| Municipio | MUNICIPIO |
-| CentroCoordinador | COORDINADOR |
-| ONG | ONG |
+| Actor Bonita | Usuario Bonita (lab) | Rol app JWT | Human tasks |
+|---|---|---|---|
+| Municipio (+ Employee initiator) | `rs.municipio` | MUNICIPIO | Registrar emergencia; startProcess |
+| CentroCoordinador | `rs.coordinador` | COORDINADOR | Generar y publicar lotes, Evaluar curso alternativo, Monitorear despliegue |
+| ONG | `rs.ong` | ONG | Marcar actividad finalizada |
 
-La cuenta técnica Bonita se mapea a los tres actores. Los usuarios JWT de PostgreSQL no son usuarios Bonita. Publicar lotes en la app exige **COORDINADOR** (Centro Coordinador del enunciado), aunque la lane del diagrama diga Municipio: el motor usa la cuenta técnica.
+Hay **un usuario Bonita por actor**. Ya no se mapea una sola cuenta (`walter.bates`) a los tres. Los usuarios JWT de PostgreSQL no son usuarios Bonita: el backend elige la credencial según la tarea. Setup reproducible: [BONITA_USUARIOS_LOCAL.md](BONITA_USUARIOS_LOCAL.md).
+
+**Generar y publicar lotes** está en la lane Municipio del diagrama pero el actor efectivo es **CentroCoordinador** (`overrideActorsOfTheLane`), alineado al rol COORDINADOR de la app.
+
+El Sistema Nacional **no** es actor humano (Service Tasks / API externa; Entrega 3).
 
 ## Configuración
 
 ```dotenv
 BONITA_ENABLED=false
+BONITA_USER_MUNICIPIO=rs.municipio
+BONITA_PASS_MUNICIPIO=
+BONITA_USER_COORDINADOR=rs.coordinador
+BONITA_PASS_COORDINADOR=
+BONITA_USER_ONG=rs.ong
+BONITA_PASS_ONG=
 BONITA_PROCESS_ID=
 BONITA_WORKFLOW_PROCESS_IDS=
 BONITA_CALLBACK_SECRET=
@@ -168,9 +178,11 @@ JWT_SECRET=change-me-rescuesync-jwt-secret-32c
 ```
 
 - `BONITA_ENABLED=false`: flujo local sin motor. `nueva-ronda` y timers reales requieren Bonita.
+- Con `BONITA_ENABLED=true` son obligatorios los tres pares `BONITA_USER_*` / `BONITA_PASS_*` (ya no `BONITA_USERNAME` / `BONITA_PASSWORD`).
 - `BONITA_WORKFLOW_PROCESS_IDS`: IDs de definiciones **verificadas** (RescueSync 1.6 desplegado). Vacío bloquea tramos posteriores al registro.
 - `OFERTAS_VALIDACION_MODE=DESARROLLO`: permite ver/adjudicar sin Sistema Nacional. Entrega 3 reemplazará esto.
 - Auth de la app: JWT (`Authorization: Bearer`). En tests, `AUTH_ALLOW_DEV_HEADER` / `NODE_ENV=test` acepta `X-Dev-User-Id`.
+- `inspect` / listado de tareas ready hace login con los tres actores y une por `task.id`.
 
 `npm run bonita:inspect` solo consulta casos vinculados.
 
