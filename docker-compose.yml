@@ -20,12 +20,8 @@ services:
   sistema_nacional:
     build:
       context: ./sistema_nacional
-    environment:
-      - PORT=${PORT}
-      - DATABASE_URL=${DATABASE_URL}
-      - JWT_SECRET=${JWT_SECRET}
-      - ADMIN_EMAIL=${ADMIN_EMAIL}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    env_file:
+      - "./sistema_nacional/.env"
     ports:
       - "3001:3001"
     develop:
