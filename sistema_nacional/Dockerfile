@@ -17,7 +17,9 @@ RUN npm ci
 
 COPY --chown=rescuesync:rescuesync . .
 
+RUN chmod +x /app/entrypoint.sh
+
 USER rescuesync
 
-EXPOSE 3001
-CMD ["npm", "run", "dev"]
+
+ENTRYPOINT ["sh", "/app/entrypoint.sh"]
