@@ -17,6 +17,17 @@ services:
       timeout: 5s
       retries: 10
 
+  sistema_nacional:
+    build:
+      context: ./sistema_nacional
+    environment:
+      - PORT=${PORT}
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    ports:
+      - "3001:3001"
+
 volumes:
   rescuesync_pg16:
-
