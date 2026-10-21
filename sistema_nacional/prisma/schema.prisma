@@ -43,7 +43,8 @@ model Usuario {
 model Ong {
   id              Int                @id @default(autoincrement())
   nombre          String
-  cuit            String             @unique
+  cuit            String?            @unique // opcional: la app local no lo exige
+  externalId      String?            @unique // id del usuario ONG en la app local
   estado          EstadoOng          @default(PENDIENTE)
   createdAt       DateTime           @default(now())
   usuario         Usuario?
