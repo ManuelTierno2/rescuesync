@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { prisma } from "../src/db.js";
+import { prisma } from "./db.js";
 
 const email = (process.env.ADMIN_EMAIL ?? "admin@rescuesync.local").toLowerCase();
 const password = process.env.ADMIN_PASSWORD;

@@ -130,5 +130,62 @@
       "Con esto quedan implementados los cinco servicios mínimos de la API (login y onboarding, catálogo, validación, bloqueo y liberación).",
       "Pendiente: Swagger, Dockerfile de producción, despliegue en Render y el cliente del Sistema Nacional en el backend local."
     ]
+  },
+  {
+    "fecha": "21 de octubre de 2026",
+    "titulo": "Dockerfile de producción y compose corregido",
+    "resumen": "El Dockerfile pasó a tener dos targets: uno de producción (el que usará Render) y uno de desarrollo (el que usa docker compose). Se corrigió el compose para que funcione de punta a punta sin archivos .env.",
+    "cambios": [
+      "Dockerfile multi-stage. Target runtime (último, se construye por defecto): compila en una etapa aparte, instala solo dependencias de producción, corre como usuario node y al arrancar ejecuta prisma migrate deploy, el seed (idempotente) y node dist/server.js. Render inyecta PORT. Target dev: arranque con tsx watch, como lo dejó Pedro.",
+      ".dockerignore nuevo: ya no entran a la imagen node_modules, dist, .env, el cliente generado, docs ni PDFs.",
+      "El seed se movió de prisma/seed.ts a src/seed.ts para que se compile a dist/seed.js y corra en producción sin tsx. npm run db:seed sigue funcionando igual.",
+      "prisma pasó de devDependencies a dependencies: hace falta en producción para migrate deploy.",
+      "docker-compose.yml: el servicio usa target dev; DATABASE_URL apunta al host postgres:5432 de la red de compose (antes apuntaba a localhost, que dentro del contenedor no es la base); JWT_SECRET, ADMIN_EMAIL y ADMIN_PASSWORD tienen valores de desarrollo por defecto y se pueden pisar con SN_JWT_SECRET, SN_ADMIN_EMAIL y SN_ADMIN_PASSWORD. Ya no depende de un .env ni de la opción links. El watch ignora node_modules, dist y el cliente generado.",
+      "entrypoint.sh (desarrollo): set -e y exec para que el proceso reciba las señales.",
+      ".env.example: el puerto de la base pasa a 5440, que es el que publica el compose."
+    ],
+    "archivos": [
+      "sistema_nacional/Dockerfile",
+      "sistema_nacional/.dockerignore (nuevo)",
+      "sistema_nacional/entrypoint.sh",
+      "sistema_nacional/src/seed.ts (movido desde prisma/seed.ts)",
+      "sistema_nacional/package.json y package-lock.json",
+      "sistema_nacional/.env.example",
+      "docker-compose.yml"
+    ],
+    "verificacion": [
+      "Imagen runtime construida y ejecutada contra el Postgres del compose con un schema descartable: aplicó las tres migraciones, corrió el seed, /health respondió ok, el login con el ADMIN devolvió token y el proceso corre como usuario node. El schema de prueba se borró.",
+      "docker compose up --build sistema_nacional (target dev) desde un clon sin .env: migró, sembró, arrancó con tsx watch en el puerto 3001 y el login respondió.",
+      "npm run typecheck y npm test (8 tests) siguen pasando."
+    ],
+    "notas": [
+      "La imagen de producción pesa unos 530 MB, sobre todo por el CLI de Prisma. Es aceptable para Render, se puede reducir más adelante.",
+      "docker-compose.yml es un archivo compartido que modificó Pedro: avisarle del cambio de DATABASE_URL, target y variables.",
+      "El README y backend/.env.example de la raíz siguen indicando el puerto 5432 para Postgres; el compose publica 5440.",
+      "Pendiente: Swagger, preparar el deploy en Render (variables, base gestionada) y actualizar la guía."
+    ]
+  },
+  {
+    "fecha": "21 de octubre de 2026",
+    "titulo": "Blueprint de Render para el despliegue",
+    "resumen": "Se agregó render.yaml en la raíz del repositorio para crear en Render, con un solo paso, el servicio web del Sistema Nacional y su base PostgreSQL gestionada.",
+    "cambios": [
+      "render.yaml (raíz del repo): servicio web docker en plan free, construido desde sistema_nacional/Dockerfile con contexto sistema_nacional (el último stage, runtime), chequeo de salud en /health y build filter para que solo redespliegue cuando cambia sistema_nacional/.",
+      "Variables de entorno: DATABASE_URL se toma de la base gestionada (sistema-nacional-db); JWT_SECRET lo genera Render con un valor aleatorio; ADMIN_EMAIL fijo; ADMIN_PASSWORD se pide al crear el Blueprint y no queda en el repositorio.",
+      "Base de datos PostgreSQL gestionada (plan free, base y usuario sistema_nacional). Sin ?schema= en la URL el sistema usa el schema public."
+    ],
+    "archivos": [
+      "render.yaml (nuevo)"
+    ],
+    "verificacion": [
+      "El YAML se validó con un parser; los campos se contrastaron con la documentación de Blueprints de Render (el campo dockerTarget no existe, por eso el Dockerfile deja runtime como último stage).",
+      "La imagen que construirá Render ya se había probado localmente (migración, seed, /health y login) con el mismo contexto y Dockerfile.",
+      "No se verificó el despliegue real: requiere la cuenta de Render y que la rama esté subida a GitHub."
+    ],
+    "notas": [
+      "Plan free: el servicio se duerme tras 15 minutos sin tráfico y la primera petición tarda cerca de un minuto en despertarlo; tener en cuenta para llamadas desde Bonita o el backend.",
+      "Plan free: la base expira a los 30 días de creada (con 14 días de gracia antes de borrarse) y no tiene backups. Si se crea el 22/10 vence cerca del 21/11, antes del coloquio del 26/11. Como el seed y las migraciones son reproducibles, se puede recrear la base cerca de la entrega final.",
+      "Después del primer despliegue hay que guardar la URL pública y la contraseña ADMIN para configurar el cliente en el backend local."
+    ]
   }
 ]

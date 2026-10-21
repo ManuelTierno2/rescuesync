@@ -1,0 +1,30 @@
+# Blueprint de Render para el Sistema Nacional (Entrega 3).
+# Render construye el último stage del Dockerfile (runtime): migra, siembra y arranca solo.
+services:
+  - type: web
+    name: sistema-nacional
+    runtime: docker
+    plan: free
+    dockerfilePath: ./sistema_nacional/Dockerfile
+    dockerContext: ./sistema_nacional
+    healthCheckPath: /health
+    buildFilter:
+      paths:
+        - sistema_nacional/**
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sistema-nacional-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        value: admin@rescuesync.local
+      - key: ADMIN_PASSWORD
+        sync: false # Render lo pide al crear el Blueprint
+
+databases:
+  - name: sistema-nacional-db
+    databaseName: sistema_nacional
+    user: sistema_nacional
+    plan: free

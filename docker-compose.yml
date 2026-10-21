@@ -20,8 +20,14 @@ services:
   sistema_nacional:
     build:
       context: ./sistema_nacional
-    env_file:
-      - "./sistema_nacional/.env"
+      target: dev
+    environment:
+      PORT: "3001"
+      # Dentro de la red de compose la base se llama `postgres` y escucha en 5432.
+      DATABASE_URL: postgresql://rescuesync:rescuesync@postgres:5432/rescuesync?schema=sistema_nacional
+      JWT_SECRET: ${SN_JWT_SECRET:-dev-secret-cambiar-en-produccion}
+      ADMIN_EMAIL: ${SN_ADMIN_EMAIL:-admin@rescuesync.local}
+      ADMIN_PASSWORD: ${SN_ADMIN_PASSWORD:-admin1234}
     ports:
       - "3001:3001"
     develop:
@@ -29,11 +35,13 @@ services:
         - path: ./sistema_nacional
           action: sync
           target: /app
+          ignore:
+            - node_modules
+            - dist
+            - src/generated
     depends_on:
       postgres:
         condition: service_healthy
-    links:
-      - postgres
 
 volumes:
   rescuesync_pg16:
