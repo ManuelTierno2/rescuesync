@@ -4,12 +4,17 @@ import { authRouter } from "./auth.js";
 import { ongsRouter } from "./ongs.js";
 import { validacionRouter } from "./validacion.js";
 import { compromisosRouter } from "./compromisos.js";
+import swaggerUi from "swagger-ui-express";
+import { openapi } from "./openapi.js";
 
 export const app = express();
 app.use(cors());
 app.use(express.json());
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
+app.get("/openapi.json", (_req, res) => res.json(openapi));
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapi, { customSiteTitle: "Sistema Nacional - API" }));
+app.get("/", (_req, res) => res.redirect("/docs"));
 app.use(authRouter);
 app.use(ongsRouter);
 app.use(validacionRouter);

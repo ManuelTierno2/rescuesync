@@ -187,5 +187,32 @@
       "Plan free: la base expira a los 30 días de creada (con 14 días de gracia antes de borrarse) y no tiene backups. Si se crea el 22/10 vence cerca del 21/11, antes del coloquio del 26/11. Como el seed y las migraciones son reproducibles, se puede recrear la base cerca de la entrega final.",
       "Después del primer despliegue hay que guardar la URL pública y la contraseña ADMIN para configurar el cliente en el backend local."
     ]
+  },
+  {
+    "fecha": "21 de octubre de 2026",
+    "titulo": "Documentación Swagger (OpenAPI)",
+    "resumen": "Se documentaron los 17 endpoints con OpenAPI 3.0 y se publicó la interfaz Swagger UI, que permite probar la API desde el navegador autenticándose con el JWT.",
+    "cambios": [
+      "GET /docs: Swagger UI con botón Authorize (esquema Bearer). GET /openapi.json: la especificación en JSON. GET /: redirige a /docs. Los tres son públicos.",
+      "src/openapi.ts: especificación OpenAPI 3.0.3 con los 17 endpoints agrupados por Estado, Autenticación, Catálogo, ONGs, Validación y Compromisos. Cada uno lleva descripción, ejemplo de cuerpo, esquema de seguridad y todas sus respuestas (200, 201, 400, 401, 403, 404, 409).",
+      "La descripción de los endpoints explica las reglas de negocio: validación sin rechazos binarios, el significado de COMPLETA, PARCIAL, APOYO y SIN_CAPACIDAD, el bloqueo todo o nada con locking e idempotencia, y la liberación por ONG o por emergencia. El 409 del bloqueo documenta el detalle por ítem.",
+      "Dependencia nueva: swagger-ui-express (con sus tipos)."
+    ],
+    "archivos": [
+      "src/openapi.ts (nuevo)",
+      "src/openapi.test.ts (nuevo)",
+      "src/app.ts",
+      "package.json y package-lock.json"
+    ],
+    "verificacion": [
+      "La especificación se validó con swagger-cli: válida (OpenAPI 3.0.3, 15 rutas, 17 operaciones).",
+      "Test nuevo (npm test, 9 pasan): compara las rutas registradas en Express contra las de la especificación y falla si falta documentar un endpoint o sobra uno. Se comprobó que falla al renombrar una ruta de la spec.",
+      "/docs responde 200 (HTML), / redirige a /docs y /openapi.json devuelve la especificación."
+    ],
+    "notas": [
+      "La especificación está escrita a mano; el test cubre rutas y métodos, pero no los esquemas de cuerpo: si cambia un campo hay que actualizarlo en src/openapi.ts.",
+      "En Render, /docs aparece cuando se redespliegue la rama que sigue el servicio.",
+      "Pendiente: actualizar la guía en PDF, el documento de entrega (URLs y horas) y el cliente del Sistema Nacional en el backend local."
+    ]
   }
 ]
