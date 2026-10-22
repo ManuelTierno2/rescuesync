@@ -260,7 +260,7 @@
           <iteratorExpression xmi:type="expression:Expression" xmi:id="_PU0nd7haEfGBDbnOg0JlNw" name="multiInstanceIterator" content="multiInstanceIterator" type="MULTIINSTANCE_ITERATOR_TYPE" returnType="java.lang.Object" returnTypeFixed="true"/>
           <completionCondition xmi:type="expression:Expression" xmi:id="_PU0ndrhaEfGBDbnOg0JlNw" name="" content="" returnType="java.lang.Boolean" returnTypeFixed="true"/>
         </elements>
-        <elements xmi:type="process:Task" xmi:id="_91GHUKfpEfGZSb5q5b0p5g" name="Generar y publicar lotes" outgoing="_KD-DwLhYEfGBDbnOg0JlNw" incoming="_-b1XMKfpEfGZSb5q5b0p5g _UYs9gL3rEfGgXNzVOpZC9Q" overrideActorsOfTheLane="false">
+        <elements xmi:type="process:Task" xmi:id="_91GHUKfpEfGZSb5q5b0p5g" name="Generar y publicar lotes" outgoing="_KD-DwLhYEfGBDbnOg0JlNw" incoming="_-b1XMKfpEfGZSb5q5b0p5g _UYs9gL3rEfGgXNzVOpZC9Q" overrideActorsOfTheLane="true" actor="_CUNXYK7DEfGSsY55kcG7Og">
           <dynamicLabel xmi:type="expression:Expression" xmi:id="_91HVcafpEfGZSb5q5b0p5g" name="" content="" returnTypeFixed="true"/>
           <dynamicDescription xmi:type="expression:Expression" xmi:id="_91HVcKfpEfGZSb5q5b0p5g" name="" content="" returnTypeFixed="true"/>
           <stepSummary xmi:type="expression:Expression" xmi:id="_91HVcqfpEfGZSb5q5b0p5g" name="" content="" returnTypeFixed="true"/>
@@ -680,14 +680,14 @@
       <actors xmi:type="process:Actor" xmi:id="_XDEoIKfpEfGZSb5q5b0p5g" name="Municipio"/>
       <actors xmi:type="process:Actor" xmi:id="_CUNXYK7DEfGSsY55kcG7Og" name="CentroCoordinador"/>
       <actors xmi:type="process:Actor" xmi:id="_DVdZAK7DEfGSsY55kcG7Og" name="ONG"/>
-      <configurations xmi:type="configuration:Configuration" xmi:id="_Et16EL3eEfGgXNzVOpZC9Q" name="Production" version="9" username="walter.bates">
+      <configurations xmi:type="configuration:Configuration" xmi:id="_Et16EL3eEfGgXNzVOpZC9Q" name="Production" version="9" username="rs.municipio">
         <actorMappings xmi:type="actormapping:ActorMappingsType" xmi:id="_EuASIL3eEfGgXNzVOpZC9Q">
           <actorMapping xmi:type="actormapping:ActorMapping" xmi:id="_EuASIb3eEfGgXNzVOpZC9Q" name="Employee actor">
             <groups xmi:type="actormapping:Groups" xmi:id="_EuASIr3eEfGgXNzVOpZC9Q"/>
             <memberships xmi:type="actormapping:Membership" xmi:id="_EuASI73eEfGgXNzVOpZC9Q"/>
             <roles xmi:type="actormapping:Roles" xmi:id="_EuASJL3eEfGgXNzVOpZC9Q"/>
             <users xmi:type="actormapping:Users" xmi:id="_EuASJb3eEfGgXNzVOpZC9Q">
-              <user>walter.bates</user>
+              <user>rs.municipio</user>
             </users>
           </actorMapping>
           <actorMapping xmi:type="actormapping:ActorMapping" xmi:id="_EuASJr3eEfGgXNzVOpZC9Q" name="Municipio">
@@ -695,7 +695,7 @@
             <memberships xmi:type="actormapping:Membership" xmi:id="_EuASKL3eEfGgXNzVOpZC9Q"/>
             <roles xmi:type="actormapping:Roles" xmi:id="_EuASKb3eEfGgXNzVOpZC9Q"/>
             <users xmi:type="actormapping:Users" xmi:id="_EuASKr3eEfGgXNzVOpZC9Q">
-              <user>walter.bates</user>
+              <user>rs.municipio</user>
             </users>
           </actorMapping>
           <actorMapping xmi:type="actormapping:ActorMapping" xmi:id="_EuASK73eEfGgXNzVOpZC9Q" name="CentroCoordinador">
@@ -703,7 +703,7 @@
             <memberships xmi:type="actormapping:Membership" xmi:id="_EuASLb3eEfGgXNzVOpZC9Q"/>
             <roles xmi:type="actormapping:Roles" xmi:id="_EuASLr3eEfGgXNzVOpZC9Q"/>
             <users xmi:type="actormapping:Users" xmi:id="_EuASL73eEfGgXNzVOpZC9Q">
-              <user>walter.bates</user>
+              <user>rs.coordinador</user>
             </users>
           </actorMapping>
           <actorMapping xmi:type="actormapping:ActorMapping" xmi:id="_EuASML3eEfGgXNzVOpZC9Q" name="ONG">
@@ -711,7 +711,7 @@
             <memberships xmi:type="actormapping:Membership" xmi:id="_EuASMr3eEfGgXNzVOpZC9Q"/>
             <roles xmi:type="actormapping:Roles" xmi:id="_EuASM73eEfGgXNzVOpZC9Q"/>
             <users xmi:type="actormapping:Users" xmi:id="_EuASNL3eEfGgXNzVOpZC9Q">
-              <user>walter.bates</user>
+              <user>rs.ong</user>
             </users>
           </actorMapping>
         </actorMappings>

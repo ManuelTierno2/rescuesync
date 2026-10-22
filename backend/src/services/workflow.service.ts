@@ -2,7 +2,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Prisma, PrismaClient, AccionWorkflow } from '../generated/prisma/client.js';
 import { AppError } from '../errors/app-error.js';
-import { BonitaError, type HumanTask } from '../integrations/bonita/bonita.client.js';
+import { actorForTaskName, BonitaError, type HumanTask } from '../integrations/bonita/bonita.client.js';
 import { createBonitaService, type BonitaService } from '../integrations/bonita/bonita.service.js';
 import { currentRound, lockEmergency, roundCoverage } from './workflow-data.js';
 
@@ -53,8 +53,8 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
       conflict('BPMN_INCOMPATIBLE', 'La definición necesita los cambios manuales de Studio y su verificación antes de habilitar este tramo.');
     if (!options.callbackSecret) conflict('BPMN_CALLBACK_MISSING', 'Falta configurar el secreto de los conectores de convocatoria.');
   }
-  async function checkContract(taskId: string, values: Record<string, unknown>) {
-    const contract = await client!.getTaskContract(taskId) as { inputs?: { name: string; type: string; multiple?: boolean }[] };
+  async function checkContract(taskId: string, taskName: string, values: Record<string, unknown>) {
+    const contract = await client!.getTaskContract(taskId, actorForTaskName(taskName)) as { inputs?: { name: string; type: string; multiple?: boolean }[] };
     if (!contract || !Array.isArray(contract.inputs)) throw new BonitaError('BPMN_CONTRACT_INCOMPATIBLE', 'No se pudo verificar el contrato de la tarea.');
     const inputs = contract.inputs;
     if (inputs.length !== Object.keys(values).length || inputs.some(i => !(i.name in values)))
@@ -154,7 +154,7 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
     const contrato: Record<string, unknown> = action === 'registrar' ? { emergenciaId }
       : action === 'decidir' ? { decisionCurso: input.decisionCurso } : {};
     if (found && action === 'finalizar-monitoreo') {
-      const contract = await client!.getTaskContract(found.id) as { inputs?: { name: string }[] };
+      const contract = await client!.getTaskContract(found.id, actorForTaskName(found.name)) as { inputs?: { name: string }[] };
       if (contract?.inputs?.some(i => i.name === 'ongDestinatariosInput')) {
         const round = await prisma.ronda.findFirst({ where: { emergencia_id: emergenciaId }, orderBy: { numero: 'desc' },
           include: { participaciones: { select: { ong_usuario_id: true } } } });
@@ -164,7 +164,7 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
         contrato.ongDestinatariosInput = recipients;
       }
     }
-    if (found) await checkContract(found.id, contrato);
+    if (found) await checkContract(found.id, found.name, contrato);
     const saved = await prisma.$transaction(async tx => {
       const locked = await lockEmergency(tx, emergenciaId);
       if (locked.cerrada_at) conflict('EMERGENCIA_CERRADA', 'El operativo ya está cerrado.');
@@ -270,7 +270,7 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
         if (state.state === 'OPEN') {
           data.readyTasks = await client.listReadyHumanTasks(e.bonita_instance_id.toString());
           for (const task of data.readyTasks) if (task.name === taskNames['finalizar-actividad']) {
-            try { task.ongUsuarioId = String(await client.getActivityVariable(task.id, 'ongUsuarioId')); }
+            try { task.ongUsuarioId = String(await client.getActivityVariable(task.id, 'ongUsuarioId', 'ong')); }
             catch (error) { warnings.push(integrationWarning(error)); }
           }
           data.availableActions = Object.entries(taskNames)

@@ -1,7 +1,7 @@
 // Read-only diagnostic: never instantiates, executes, assigns or modifies a case.
 import { readEnv } from '../src/config/env.js';
 import { createPrismaClient } from '../src/database/prisma.js';
-import { createBonitaClient, BonitaError } from '../src/integrations/bonita/bonita.client.js';
+import { actorForTaskName, createBonitaClient, BonitaError } from '../src/integrations/bonita/bonita.client.js';
 async function main() {
   const env = readEnv();
   if (!env.bonita.enabled) { console.log(JSON.stringify({ enabled: false })); return; }
@@ -15,8 +15,8 @@ async function main() {
         const tasks = state.state === 'OPEN' ? await client.listReadyHumanTasks(e.caseId) : [];
         const contracts = [];
         for (const task of tasks) {
-          const contract = await client.getTaskContract(task.id) as { inputs?: { name: string; type: string; multiple?: boolean }[] };
-          contracts.push({ taskId: task.id, name: task.name, inputs: contract.inputs?.map(i => ({ name: i.name, type: i.type, multiple: i.multiple ?? false })) });
+          const contract = await client.getTaskContract(task.id, actorForTaskName(task.name)) as { inputs?: { name: string; type: string; multiple?: boolean }[] };
+          contracts.push({ taskId: task.id, name: task.name, actor: actorForTaskName(task.name), inputs: contract.inputs?.map(i => ({ name: i.name, type: i.type, multiple: i.multiple ?? false })) });
         }
         console.log(JSON.stringify({ emergenciaId: e.id, caseId: e.caseId, ...state, contracts }));
       } catch (error) { console.log(JSON.stringify({ caseId: e.caseId, code: error instanceof BonitaError ? error.code : 'INSPECTION_FAILED' })); }

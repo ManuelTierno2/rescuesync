@@ -1,9 +1,23 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
-import type { BonitaConfig } from '../../src/integrations/bonita/bonita.client.js';
+import type { BonitaActor, BonitaConfig } from '../../src/integrations/bonita/bonita.client.js';
+import { actorForTaskName } from '../../src/integrations/bonita/bonita.client.js';
 
 export const PROCESS_ID = '5777042023671752656';
+
+export const STUB_CREDENTIALS = {
+  municipio: { username: 'rs.municipio', password: 'pass-municipio' },
+  coordinador: { username: 'rs.coordinador', password: 'pass-coordinador' },
+  ong: { username: 'rs.ong', password: 'pass-ong' },
+} as const;
+
+const USER_IDS: Record<string, string> = {
+  'rs.municipio': '41',
+  'rs.coordinador': '42',
+  'rs.ong': '43',
+};
+
 export interface StubOptions {
   loginStatus?: number; processStatus?: number; startStatus?: number; logoutStatus?: number;
   definition?: Record<string, unknown>; startBody?: string; delayStartMs?: number;
@@ -12,12 +26,14 @@ export interface StubOptions {
   searchOverride?: unknown[]; contractOverride?: unknown; onExecution?: (task: StubTask) => Promise<void>;
   alternativeDecision?: boolean;
   monitorRecipientsContract?: boolean;
+  /** Si true, humanTask solo devuelve tareas del actor logueado (simula mapping real). */
+  filterTasksByActor?: boolean;
 }
 export interface StubTask { id: string; caseId: string; name: string; state: string; assigned_id: string; ongUsuarioId?: string }
 let sequence = 100n;
 export async function bonitaServer(options: StubOptions = {}) {
   const requests: { path: string; method: string; body: string; cookie: string; token: string }[] = [];
-  const sessions = new Map<string, string>();
+  const sessions = new Map<string, { token: string; username: string }>();
   const failures: unknown[] = [];
   const tasks: StubTask[] = [];
   const archivedTasks: (StubTask & { sourceObjectId: string })[] = [];
@@ -64,6 +80,12 @@ export async function bonitaServer(options: StubOptions = {}) {
         break;
     }
   }
+  function actorForUsername(username: string): BonitaActor | null {
+    for (const actor of ['municipio', 'coordinador', 'ong'] as const) {
+      if (STUB_CREDENTIALS[actor].username === username) return actor;
+    }
+    return null;
+  }
   const server = createServer(async (req, res) => {
     try {
       let body = '';
@@ -73,9 +95,15 @@ export async function bonitaServer(options: StubOptions = {}) {
       const token = String(req.headers['x-bonita-api-token'] || '');
       requests.push({ path, body, method: req.method || '', cookie, token });
       if (path === '/bonita/loginservice') {
+        const params = new URLSearchParams(body);
+        const username = params.get('username') ?? '';
+        const password = params.get('password') ?? '';
+        const actor = actorForUsername(username);
+        const credentialsOk = !!actor && STUB_CREDENTIALS[actor].password === password;
+        const status = options.loginStatus ?? (credentialsOk ? 204 : 401);
         const sessionId = randomUUID();
         const tokenValue = randomUUID();
-        sessions.set(sessionId, tokenValue);
+        if (status === 204 && credentialsOk) sessions.set(sessionId, { token: tokenValue, username });
         const values = [
           ['JSESSIONID', sessionId],
           ['X-Bonita-API-Token', tokenValue],
@@ -83,11 +111,12 @@ export async function bonitaServer(options: StubOptions = {}) {
         ].filter(([key]) => key !== options.missingCookie);
         res.setHeader('Set-Cookie', values.map(([key, value]) => key + '=' + value + '; Path=/bonita; HttpOnly; Expires=Wed, 01 Jan 2031 00:00:00 GMT'));
         res.setHeader('Location', '/unexpected-redirect');
-        res.statusCode = options.loginStatus ?? 204;
+        res.statusCode = status;
         res.end(); return;
       }
       const sessionId = /(?:^|; )JSESSIONID=([^;]+)/.exec(cookie)?.[1];
-      if (!sessionId || sessions.get(sessionId) !== token || !cookie.includes('bonita.tenant=1')) {
+      const session = sessionId ? sessions.get(sessionId) : undefined;
+      if (!session || session.token !== token || !cookie.includes('bonita.tenant=1')) {
         res.writeHead(401).end('Invalid session'); return;
       }
       res.setHeader('Content-Type', 'application/json');
@@ -101,12 +130,20 @@ export async function bonitaServer(options: StubOptions = {}) {
         res.setHeader('Content-Range', `${p * c}-${Math.min((p + 1) * c, filtered.length)}/${filtered.length}`);
         res.end(JSON.stringify(filtered.slice(p * c, (p + 1) * c)));
       };
-      if (pathname === '/bonita/API/system/session/unusedId') { res.end('{"user_id":"42"}');
+      if (pathname === '/bonita/API/system/session/unusedId') {
+        res.end(JSON.stringify({ user_id: USER_IDS[session.username] ?? '42' }));
       } else if (pathname === '/bonita/API/bpm/humanTask') {
         if (options.delayTaskMs) await setTimeout(options.delayTaskMs);
         res.statusCode = options.taskStatus ?? 200;
         if (options.searchOverride) res.end(JSON.stringify(options.searchOverride));
-        else page(tasks as unknown as Record<string, unknown>[]);
+        else {
+          let visible = tasks as unknown as Record<string, unknown>[];
+          if (options.filterTasksByActor) {
+            const actor = actorForUsername(session.username);
+            visible = tasks.filter(t => actor && actorForTaskName(t.name) === actor) as unknown as Record<string, unknown>[];
+          }
+          page(visible);
+        }
       } else if (pathname === '/bonita/API/bpm/archivedHumanTask') { page(archivedTasks as unknown as Record<string, unknown>[]);
       } else if (pathname === '/bonita/API/bpm/archivedCase') {
         page([...cases].filter(([, c]) => c.completed).map(([caseId]) => ({ id: String(++sequence), sourceObjectId: caseId, state: 'completed' })));
@@ -131,6 +168,8 @@ export async function bonitaServer(options: StubOptions = {}) {
         } else if (sub === 'context') res.end('{}');
         else if (sub === 'execution') {
           if (task.state !== 'ready') { res.writeHead(409).end('{}'); return; }
+          const actor = actorForUsername(session.username);
+          if (!actor || actorForTaskName(task.name) !== actor) { res.writeHead(403).end('{}'); return; }
           if (options.executionStatus && options.executionStatus !== 204) { res.writeHead(options.executionStatus).end('{}'); return; }
           const values = JSON.parse(body) as Record<string, unknown>;
           if (task.name === 'Registrar emergencia' && typeof values.emergenciaId !== 'string') { res.writeHead(400).end('{}'); return; }
@@ -155,7 +194,7 @@ export async function bonitaServer(options: StubOptions = {}) {
         if (caseId) addTask(caseId, 'Registrar emergencia');
         res.end(options.startBody ?? '{"caseId":"9223372036854775806"}');
       } else if (path === '/bonita/logoutservice?redirect=false') {
-        sessions.delete(sessionId);
+        sessions.delete(sessionId!);
         res.writeHead(options.logoutStatus ?? 200).end();
       } else res.writeHead(404).end();
     } catch (error) {
@@ -168,11 +207,16 @@ export async function bonitaServer(options: StubOptions = {}) {
   if (!address || typeof address === 'string') throw new Error('Missing test port');
   const config: Extract<BonitaConfig, { enabled: true }> = {
     enabled: true, url: 'http://127.0.0.1:' + address.port + '/bonita',
-    username: 'test-user', password: 'test & password=+', processId: PROCESS_ID, timeoutMs: 3000,
+    credentials: {
+      municipio: { ...STUB_CREDENTIALS.municipio },
+      coordinador: { ...STUB_CREDENTIALS.coordinador },
+      ong: { ...STUB_CREDENTIALS.ong },
+    },
+    processId: PROCESS_ID, timeoutMs: 3000,
   };
   return {
     tasks, archivedTasks, cases, addTask, expire, options,
-    requests, failures, config,
+    requests, failures, config, sessions,
     close: async () => {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());

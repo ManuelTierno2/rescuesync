@@ -1,7 +1,7 @@
 ﻿import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createBonitaClient } from '../src/integrations/bonita/bonita.client.js';
-import { bonitaServer } from './helpers/bonita-server.js';
+import { bonitaServer, STUB_CREDENTIALS } from './helpers/bonita-server.js';
 
 describe('Human Tasks: protocolo y desambiguación', () => {
   it('pagina todas las tareas y filtra caseId, ready y nombre exacto sin IDs fijos', async () => {
@@ -20,6 +20,30 @@ describe('Human Tasks: protocolo y desambiguación', () => {
         assert.ok(params.getAll('f').includes('state=ready'));
       }
       assert.ok(searches.some(r => r.path.includes('p=1')));
+    } finally { await stub.close(); }
+  });
+  it('mergea tareas de los tres actores y completa cada human task con su usuario', async () => {
+    const stub = await bonitaServer({ filterTasksByActor: true });
+    try {
+      stub.addTask('9', 'Registrar emergencia');
+      stub.addTask('9', 'Monitorear despliegue');
+      stub.addTask('9', 'Marcar actividad finalizada', 'ong-a');
+      const client = createBonitaClient(stub.config);
+      const ready = await client.listReadyHumanTasks('9');
+      assert.equal(ready.length, 3);
+      const logins = stub.requests.filter(r => r.path === '/bonita/loginservice').map(r => new URLSearchParams(r.body).get('username'));
+      assert.ok(logins.includes(STUB_CREDENTIALS.municipio.username));
+      assert.ok(logins.includes(STUB_CREDENTIALS.coordinador.username));
+      assert.ok(logins.includes(STUB_CREDENTIALS.ong.username));
+      stub.requests.length = 0;
+      await client.completeTaskByName('9', 'Registrar emergencia', { emergenciaId: 'e1' });
+      assert.equal(new URLSearchParams(stub.requests.find(r => r.path === '/bonita/loginservice')!.body).get('username'), STUB_CREDENTIALS.municipio.username);
+      stub.requests.length = 0;
+      await client.completeTaskByName('9', 'Monitorear despliegue', {});
+      assert.equal(new URLSearchParams(stub.requests.find(r => r.path === '/bonita/loginservice')!.body).get('username'), STUB_CREDENTIALS.coordinador.username);
+      stub.requests.length = 0;
+      await client.completeTaskByName('9', 'Marcar actividad finalizada', {}, 'ong-a');
+      assert.equal(new URLSearchParams(stub.requests.find(r => r.path === '/bonita/loginservice')!.body).get('username'), STUB_CREDENTIALS.ong.username);
     } finally { await stub.close(); }
   });
   it('tarea ausente devuelve null y completar por nombre no ejecuta; duplicadas fallan explícitamente', async () => {
@@ -48,8 +72,8 @@ describe('Human Tasks: protocolo y desambiguación', () => {
     const stub = await bonitaServer();
     try {
       const t = stub.addTask('9', 'Registrar emergencia'); const client = createBonitaClient(stub.config);
-      assert.deepEqual(await client.getTaskContext(t.id), {});
-      const contract = await client.getTaskContract(t.id) as { inputs: { name: string }[] };
+      assert.deepEqual(await client.getTaskContext(t.id, 'municipio'), {});
+      const contract = await client.getTaskContract(t.id, 'municipio') as { inputs: { name: string }[] };
       assert.equal(contract.inputs[0]?.name, 'emergenciaId');
       await client.completeTaskByName('9', t.name, { emergenciaId: 'local-uuid' });
       assert.ok(await client.isTaskCompleted('9', t.id));

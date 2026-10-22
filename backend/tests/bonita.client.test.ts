@@ -18,7 +18,9 @@ describe('Bonita Community 2025.2: contrato REST oficial 1.0.6', () => {
           ['GET', '/bonita/logoutservice?redirect=false'],
         ]);
         assert.deepEqual(Object.fromEntries(new URLSearchParams(stub.requests[0]!.body)), {
-          username: stub.config.username, password: stub.config.password, redirect: 'false',
+          username: stub.config.credentials.municipio.username,
+          password: stub.config.credentials.municipio.password,
+          redirect: 'false',
         });
         assert.equal(stub.requests[2]!.body, '{}');
         assert.match(stub.requests[2]!.cookie, /JSESSIONID=/);
@@ -121,7 +123,7 @@ describe('Bonita Community 2025.2: contrato REST oficial 1.0.6', () => {
     assert.equal(await createBonitaService(env.bonita).startRescueSyncProcess(undefined as never), null);
     assert.equal(readEnv({ DATABASE_URL: base.DATABASE_URL, JWT_SECRET: base.JWT_SECRET }).bonita.enabled, false);
     for (const value of ['yes', '0', 'FALSE']) assert.throws(() => readEnv({ ...base, BONITA_ENABLED: value }), /BONITA_ENABLED/);
-    assert.throws(() => readEnv({ ...base, BONITA_ENABLED: 'true' }), /BONITA_URL.*BONITA_USERNAME.*BONITA_PASSWORD.*BONITA_PROCESS_ID/);
+    assert.throws(() => readEnv({ ...base, BONITA_ENABLED: 'true' }), /BONITA_USER_MUNICIPIO|BONITA_PASS_MUNICIPIO|BONITA_PROCESS_ID/);
   });
 
   it('valida configuración habilitada sin conectarse a Bonita', () => {
@@ -129,17 +131,27 @@ describe('Bonita Community 2025.2: contrato REST oficial 1.0.6', () => {
       DATABASE_URL: 'postgresql://localhost/rescuesync',
       BONITA_ENABLED: 'true',
       BONITA_URL: 'http://localhost:8080/bonita',
-      BONITA_USERNAME: 'test',
-      BONITA_PASSWORD: 'secret-value',
+      BONITA_USER_MUNICIPIO: 'rs.municipio',
+      BONITA_PASS_MUNICIPIO: 'secret-municipio',
+      BONITA_USER_COORDINADOR: 'rs.coordinador',
+      BONITA_PASS_COORDINADOR: 'secret-coordinador',
+      BONITA_USER_ONG: 'rs.ong',
+      BONITA_PASS_ONG: 'secret-ong',
       BONITA_PROCESS_ID: PROCESS_ID,
       JWT_SECRET: 'test-jwt-secret-at-least-32-characters!!',
     };
-    assert.equal(readEnv(source).bonita.enabled, true);
+    const bonita = readEnv(source).bonita;
+    assert.equal(bonita.enabled, true);
+    if (bonita.enabled) {
+      assert.equal(bonita.credentials.municipio.username, 'rs.municipio');
+      assert.equal(bonita.credentials.coordinador.username, 'rs.coordinador');
+      assert.equal(bonita.credentials.ong.username, 'rs.ong');
+    }
     for (const [key, value] of [['BONITA_URL', 'ftp://localhost/bonita'], ['BONITA_PROCESS_ID', '1.5'], ['BONITA_TIMEOUT_MS', '0']]) {
       assert.throws(() => readEnv({ ...source, [key!]: value }), (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.ok(error.message.includes(key!));
-        assert.ok(!error.message.includes('secret-value'));
+        assert.ok(!error.message.includes('secret-municipio'));
         return true;
       });
     }

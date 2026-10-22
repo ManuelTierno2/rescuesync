@@ -156,7 +156,7 @@ local; no prueba timers, curso alternativo ni recursos nacionales.
 ## Prueba con Bonita 1.6
 
 1. Abrir `app/diagrams/MyDiagram-1.0.proc` en Studio, validar y desplegar el pool
-   **RescueSync 1.6**. Mapear la cuenta técnica a Municipio, CentroCoordinador y ONG.
+   **RescueSync 1.6**. Mapear **un usuario Bonita por actor** (`rs.municipio`, `rs.coordinador`, `rs.ong`); ver [BONITA_USUARIOS_LOCAL.md](BONITA_USUARIOS_LOCAL.md). No usar `walter.bates`.
 2. Configurar en `backend/.env`: `BONITA_ENABLED=true`, URL y credenciales técnicas,
    `BONITA_PROCESS_ID` y `BONITA_WORKFLOW_PROCESS_IDS` con el ID de esa definición.
 3. Hacer coincidir `BONITA_CALLBACK_SECRET` con el Bearer de ambos conectores;

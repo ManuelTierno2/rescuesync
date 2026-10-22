@@ -288,18 +288,22 @@ Agregar a `backend/.env`, conservando las URLs PostgreSQL existentes:
 ```dotenv
 BONITA_ENABLED=false
 BONITA_URL=http://localhost:8080/bonita
-BONITA_USERNAME=
-BONITA_PASSWORD=
+BONITA_USER_MUNICIPIO=rs.municipio
+BONITA_PASS_MUNICIPIO=
+BONITA_USER_COORDINADOR=rs.coordinador
+BONITA_PASS_COORDINADOR=
+BONITA_USER_ONG=rs.ong
+BONITA_PASS_ONG=
 BONITA_PROCESS_ID=
 BONITA_TIMEOUT_MS=10000
 ```
 
-Solo se aceptan las cadenas `true` y `false` para el interruptor. Deshabilitado no requiere ni valida otros valores Bonita y no realiza llamadas. Habilitado exige URL HTTP(S), usuario, contraseña y un ID decimal positivo de proceso compatible con BIGINT. El timeout debe estar entre 1 y 60000 milisegundos.
+Solo se aceptan las cadenas `true` y `false` para el interruptor. Deshabilitado no requiere ni valida otros valores Bonita y no realiza llamadas. Habilitado exige URL HTTP(S), **tres pares** usuario/password (uno por actor) y un ID decimal positivo de proceso compatible con BIGINT. El timeout debe estar entre 1 y 60000 milisegundos. Setup de Organization: [BONITA_USUARIOS_LOCAL.md](../BONITA_USUARIOS_LOCAL.md).
 
 Para activar:
 
 1. Tener el proceso **RescueSync** desplegado en Bonita Community 2025.2, habilitado y con configuración resuelta. El contrato de inicio del diagrama local está vacío. Esta entrega lo invoca con `{}` y no transfiere campos de la emergencia al motor.
-2. Usar un usuario existente en Bonita con permiso para consultar e iniciar ese proceso y correctamente asociado al actor iniciador. Los usuarios del seed PostgreSQL no crean cuentas en Bonita.
+2. Crear y mapear `rs.municipio`, `rs.coordinador` y `rs.ong` (no una sola cuenta para todos los actores). Los usuarios del seed PostgreSQL no crean cuentas en Bonita.
 3. Obtener el ID de la definición desplegada desde la aplicación de administración de Bonita. También se puede consultar, con la sesión autenticada, `GET /API/bpm/process?p=0&c=100&f=name%3DRescueSync&f=activationState%3DENABLED`; revisar nombre y versión y copiar su `id` como texto. No confundirlo con un ID de instancia. Un despliegue diferente puede requerir actualizar esta configuración.
 4. Completar las variables y establecer `BONITA_ENABLED=true`. Reiniciar el backend. No guardar credenciales en el repositorio ni en variables `VITE_*`.
 
