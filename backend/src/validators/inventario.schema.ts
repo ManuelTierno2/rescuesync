@@ -1,12 +1,15 @@
 import { z } from 'zod';
-import { TipoLote } from '../generated/prisma/enums.js';
+import { CodigoRecursoSn, TipoLote } from '../generated/prisma/enums.js';
 import { cantidadSchema } from './lotes.schema.js';
+
+export const codigosSn = Object.values(CodigoRecursoSn);
 
 export const crearInventarioSchema = z.strictObject({
   tipo: z.enum(TipoLote, { error: 'Debe ser PERSONAL o RECURSO.' }),
   descripcion: z.string().trim().min(1, 'La descripción es obligatoria.').max(5000),
   cantidad: cantidadSchema,
   unidad: z.string().trim().min(1, 'La unidad es obligatoria.').max(50),
+  codigoSn: z.enum(CodigoRecursoSn).nullable().optional(),
 });
 
 export const actualizarInventarioSchema = z.strictObject({
@@ -14,6 +17,7 @@ export const actualizarInventarioSchema = z.strictObject({
   descripcion: z.string().trim().min(1).max(5000).optional(),
   cantidad: cantidadSchema.optional(),
   unidad: z.string().trim().min(1).max(50).optional(),
+  codigoSn: z.enum(CodigoRecursoSn).nullable().optional(),
 }).refine((v) => Object.keys(v).length > 0, { message: 'Debe enviar al menos un campo.' });
 
 export const inventarioIdParamsSchema = z.object({ id: z.uuid({ error: 'Debe ser un UUID válido.' }) });

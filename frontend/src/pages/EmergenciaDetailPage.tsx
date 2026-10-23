@@ -1,5 +1,5 @@
 import { Link, useLocation, useParams } from 'react-router';
-import type { Emergencia, Lote, Warning } from '../api';
+import type { Emergencia, Lote, OfertaValidacion, Warning } from '../api';
 import { useApiData } from '../hooks';
 import { useDevUser } from '../auth-context';
 import { ErrorMessage, Loading, Success, formatDate } from '../ui';
@@ -12,6 +12,7 @@ function Detail({ id }: { id: string }) {
   const { user } = useDevUser();
   const emergency = useApiData<Emergencia>('/emergencias/' + id);
   const lotes = useApiData<Lote[]>('/emergencias/' + id + '/lotes');
+  const validaciones = useApiData<OfertaValidacion[]>('/emergencias/' + id + '/validaciones');
   const workflow = useWorkflow(id);
   const canCreate = user?.rol === 'COORDINADOR' && workflow.data && !workflow.data.round?.publicada_at && !workflow.data.localClosed && !workflow.error;
   const canOffer = !!workflow.data?.windows.some(w => !w.cerrada_at && new Date(w.vence_at).getTime() > Date.now())
@@ -80,7 +81,8 @@ function Detail({ id }: { id: string }) {
               )}
               <div className="lotes-list">
                 {lotes.data?.filter(l => l.ronda_id === workflow.data?.round?.id).map((lote) => (
-                  <LoteCard key={lote.id} lote={lote} canOffer={canOffer} onOfferSaved={workflow.refresh} />
+                  <LoteCard key={lote.id} lote={lote} canOffer={canOffer} onOfferSaved={workflow.refresh}
+                    validaciones={validaciones.data ?? []} />
                 ))}
               </div>
             </div>

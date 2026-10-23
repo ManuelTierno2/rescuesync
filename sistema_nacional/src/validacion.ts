@@ -17,10 +17,12 @@ const esOferta = (o: any): o is OfertaIn =>
 // porque recién al adjudicar se descuenta del inventario (ver bloqueo).
 validacionRouter.post("/validaciones", requireAuth("ADMIN"), async (req, res) => {
   const ofertas = req.body?.ofertas;
-  if (!Array.isArray(ofertas) || ofertas.length === 0 || ofertas.length > 500 || !ofertas.every(esOferta))
+  // Lista vacía = todas las ofertas locales sin código SN; Bonita igual llama y el back sintetiza SIN_CAPACIDAD.
+  if (!Array.isArray(ofertas) || ofertas.length > 500 || (ofertas.length > 0 && !ofertas.every(esOferta)))
     return res.status(400).json({
-      error: "ofertas debe ser una lista de 1 a 500 [{ofertaId, ongId, tipoRecurso, cantidad > 0, nivelRiesgo: BAJO|MEDIO|ALTO|CRITICO}]",
+      error: "ofertas debe ser una lista de 0 a 500 [{ofertaId, ongId, tipoRecurso, cantidad > 0, nivelRiesgo: BAJO|MEDIO|ALTO|CRITICO}]",
     });
+  if (ofertas.length === 0) return res.json({ resultados: [] });
 
   const refs = [...new Set(ofertas.map((o: OfertaIn) => String(o.ongId)))];
   const ongs = await prisma.ong.findMany({

@@ -44,6 +44,8 @@ export interface Oferta {
   created_at: string;
   updated_at: string;
 }
+export type CodigoRecursoSn = 'PARAMEDICO' | 'RACION_ALIMENTO' | 'AGUA_POTABLE' | 'KIT_MEDICO' | 'VEHICULO_RESCATE';
+export const CODIGOS_SN: CodigoRecursoSn[] = ['PARAMEDICO', 'RACION_ALIMENTO', 'AGUA_POTABLE', 'KIT_MEDICO', 'VEHICULO_RESCATE'];
 export interface InventarioItem {
   id: string;
   ong_usuario_id: string;
@@ -51,8 +53,21 @@ export interface InventarioItem {
   descripcion: string;
   cantidad: number;
   unidad: string;
+  codigo_sn: CodigoRecursoSn | null;
   created_at: string;
   updated_at: string;
+}
+export interface OfertaValidacion {
+  id: string;
+  ventana_id: string;
+  oferta_id: string;
+  resultado: 'COMPLETA' | 'PARCIAL' | 'APOYO' | 'SIN_CAPACIDAD';
+  cantidad_valida: number;
+  nivel_riesgo_max: string | null;
+  disponible: number;
+  motivo: string;
+  apoyo: boolean;
+  created_at: string;
 }
 export interface Consorcio {
   id: string;

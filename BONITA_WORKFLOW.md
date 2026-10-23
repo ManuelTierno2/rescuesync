@@ -213,4 +213,7 @@ Bajo `/api/emergencias/:id`, con JWT:
 
 ## Service Tasks Sistema Nacional
 
-`Validacion de ofertas`, `Adjudicar y notificar a ONG`, `Registrar compromiso de recursos` (y futuros cierre/liberación) son puntos de integración de la **Entrega 3**. No interpretar su paso automático como llamada real al Sistema Nacional.
+En la versión **1.7**, la Service Task `Validacion de ofertas` tiene 4 conectores `rest-post` encadenados:
+**Obtener ofertas para SN** → `Login Sistema Nacional` → **Validar ofertas en SN** → **Informar validacion SN**.
+Los parámetros de proceso `snUrl`, `snAdminEmail` y `snAdminPassword` se cargan en Bonita Studio (nunca en el repo).
+El compromiso (bloqueo) al adjudicar y la liberación al cerrar los ejecuta el backend RescueSync contra el SN (`SN_API_URL`, `SN_ADMIN_EMAIL`, `SN_ADMIN_PASSWORD`), no conectores de Bonita.

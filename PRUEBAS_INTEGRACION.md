@@ -6,7 +6,8 @@ Revisión del 8 de octubre de 2026, sobre la base nacional del commit `384fef6`.
 
 El Sistema Nacional es una API independiente, sin interfaz web. Incluye Express,
 Prisma/PostgreSQL, `GET /health`, `POST /login`, JWT de 8 horas y middleware
-`requireAuth(...roles)`. Todavía no hay rutas de negocio que usen ese middleware.
+`requireAuth(...roles)`, catálogos, `POST /validaciones`, `POST /compromisos`
+(bloqueo transaccional) y `POST /compromisos/liberar`, con Swagger en `/docs`.
 El seed crea un ADMIN, cinco tipos de recurso y seis certificaciones; no crea ONG.
 
 El modelo contempla ONG, certificaciones y vencimientos, recursos totales/bloqueados,
@@ -18,10 +19,12 @@ Pendientes: registro/aprobación de ONG, catálogos por API, validación por niv
 bloqueo concurrente, liberación, pruebas automatizadas propias, Swagger, Dockerfile
 y despliegue. El PDF `Guia_SistemaNacional_Etapa3_Inicio.pdf` describe el mismo alcance.
 
-Hoy no existe comunicación RescueSync/Bonita → API nacional. Los dos conectores del
-diagrama llaman al backend local (`:3000`) para abrir y evaluar la convocatoria.
+Con el proceso Bonita **1.7** y las variables `SN_API_URL`, `SN_ADMIN_EMAIL`,
+`SN_ADMIN_PASSWORD` en `backend/.env`, hay comunicación RescueSync/Bonita → SN:
+la Service Task `Validacion de ofertas` invoca al SN y devuelve el resultado al
+backend (ver [ENTREGA3.md](ENTREGA3.md)). Sin variables `SN_*`,
 `OFERTAS_VALIDACION_MODE=DESARROLLO` permite adjudicar sin validación nacional;
-`PENDIENTE` bloquea esa operación. Arrancar la API nacional no cambia ese comportamiento.
+`PENDIENTE` bloquea esa operación.
 
 ## Puertos y bases
 
@@ -139,7 +142,8 @@ $login | Select-Object tokenType, expiresIn, rol, ongId
 Esperado: health `ok`; login `Bearer`, `28800`, `ADMIN`, `ongId=null` y token en
 `$login.token`. Contraseña incorrecta o email inexistente: 401. Campos ausentes: 400.
 `/health` no consulta la base; un login exitoso comprueba además acceso a los usuarios.
-Todavía no hay un endpoint de reserva o validación al que enviar ese token.
+Con ese token: `POST /validaciones` (perfiles por oferta), `POST /compromisos`
+(bloqueo; 409 si supera el disponible), `POST /compromisos/liberar {emergenciaId}`.
 
 ## Prueba de RescueSync sin Bonita
 
@@ -153,14 +157,16 @@ Todavía no hay un endpoint de reserva o validación al que enviar ese token.
 Los usuarios provienen del seed del backend. Este recorrido prueba la aplicación
 local; no prueba timers, curso alternativo ni recursos nacionales.
 
-## Prueba con Bonita 1.6
+## Prueba con Bonita 1.7
 
 1. Abrir `app/diagrams/MyDiagram-1.0.proc` en Studio, validar y desplegar el pool
-   **RescueSync 1.6**. Mapear **un usuario Bonita por actor** (`rs.municipio`, `rs.coordinador`, `rs.ong`); ver [BONITA_USUARIOS_LOCAL.md](BONITA_USUARIOS_LOCAL.md). No usar `walter.bates`.
+   **RescueSync 1.7**. Mapear **un usuario Bonita por actor** (`rs.municipio`, `rs.coordinador`, `rs.ong`); ver [BONITA_USUARIOS_LOCAL.md](BONITA_USUARIOS_LOCAL.md). No usar `walter.bates`.
+   Cargar en los parámetros de proceso `snUrl`, `snAdminEmail` y `snAdminPassword` la URL y credenciales ADMIN del Sistema Nacional.
 2. Configurar en `backend/.env`: `BONITA_ENABLED=true`, URL y credenciales técnicas,
    `BONITA_PROCESS_ID` y `BONITA_WORKFLOW_PROCESS_IDS` con el ID de esa definición.
-3. Hacer coincidir `BONITA_CALLBACK_SECRET` con el Bearer de ambos conectores;
-   mantener `OFERTAS_VALIDACION_MODE=DESARROLLO` mientras no exista integración nacional.
+3. Hacer coincidir `BONITA_CALLBACK_SECRET` con el Bearer de los conectores;
+   configurar `SN_API_URL`, `SN_ADMIN_EMAIL`, `SN_ADMIN_PASSWORD` en `backend/.env`
+   para activar la validación nacional (sin ellas, `OFERTAS_VALIDACION_MODE=DESARROLLO`).
 4. Reiniciar el backend y crear una **emergencia nueva**; los casos anteriores no
    migran automáticamente. Completar registro desde la web y publicar lotes.
 5. Cargar ofertas antes del timer de 2 minutos. Comprobar que la apertura guarda

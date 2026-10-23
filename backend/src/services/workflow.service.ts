@@ -4,10 +4,12 @@ import type { Prisma, PrismaClient, AccionWorkflow } from '../generated/prisma/c
 import { AppError } from '../errors/app-error.js';
 import { actorForTaskName, BonitaError, type HumanTask } from '../integrations/bonita/bonita.client.js';
 import { createBonitaService, type BonitaService } from '../integrations/bonita/bonita.service.js';
+import { createSnClient, SnError, type SnClient, type SnResultadoValidacion } from '../integrations/sistema-nacional/sn.client.js';
 import { currentRound, lockEmergency, roundCoverage } from './workflow-data.js';
 
 export interface WorkflowOptions {
   compatibleProcessIds: string[]; validationMode: 'PENDIENTE' | 'DESARROLLO'; callbackSecret: string;
+  sn?: SnClient;
 }
 export const defaultWorkflowOptions: WorkflowOptions = { compatibleProcessIds: [], validationMode: 'PENDIENTE', callbackSecret: '' };
 export const taskNames = {
@@ -165,6 +167,50 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
       }
     }
     if (found) await checkContract(found.id, found.name, contrato);
+    // --- Sistema Nacional: compromiso antes de escribir y liberación antes de cerrar ---
+    const snCompromisoPorOferta = new Map<string, number>();
+    if (action === 'adjudicar' && options.sn && (input.ofertaIds?.length ?? 0) > 0) {
+      const roundSn = await prisma.ronda.findFirst({ where: { emergencia_id: emergenciaId }, orderBy: { numero: 'desc' } });
+      const seleccion = roundSn ? await prisma.oferta.findMany({
+        where: { id: { in: input.ofertaIds! }, activa: true, lote: { ronda_id: roundSn.id } },
+        include: { inventario_item: { select: { codigo_sn: true } } },
+      }) : [];
+      const grupos = new Map<string, { loteId: string; ongId: string; items: Map<string, number>; ofertaIds: string[] }>();
+      for (const o of seleccion) {
+        const codigo = o.inventario_item?.codigo_sn;
+        if (!codigo) continue;
+        const key = `${o.lote_id}:${o.ong_usuario_id}`;
+        const g: { loteId: string; ongId: string; items: Map<string, number>; ofertaIds: string[] } =
+          grupos.get(key) ?? { loteId: o.lote_id, ongId: o.ong_usuario_id, items: new Map<string, number>(), ofertaIds: [] };
+        g.items.set(codigo, (g.items.get(codigo) ?? 0) + o.cantidad_ofrecida);
+        g.ofertaIds.push(o.id);
+        grupos.set(key, g);
+      }
+      try {
+        for (const g of grupos.values()) {
+          const r = await options.sn.comprometer({
+            emergenciaId, loteId: g.loteId, ongId: g.ongId,
+            items: [...g.items.entries()].map(([tipoRecurso, cantidad]) => ({ tipoRecurso, cantidad })),
+          });
+          if (!r.compromiso) {
+            await options.sn.liberar({ emergenciaId }).catch(() => {});
+            throw new AppError(409, 'SN_COMPROMISO_RECHAZADO', `El Sistema Nacional rechazó el compromiso: ${r.error ?? 'sin detalle'}`);
+          }
+          for (const id of g.ofertaIds) snCompromisoPorOferta.set(id, r.compromiso.id);
+        }
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw new AppError(502, 'SN_NO_DISPONIBLE', 'El Sistema Nacional no confirmó el compromiso. La adjudicación no se registró.');
+      }
+    }
+    if (action === 'cerrar' && options.sn) {
+      const roundSn = await prisma.ronda.findFirst({ where: { emergencia_id: emergenciaId }, orderBy: { numero: 'desc' } });
+      const pendientes = roundSn ? await prisma.participacionOng.count({ where: { ronda_id: roundSn.id, finalizada_at: null } }) : 1;
+      if (roundSn?.monitoreo_finalizado_at && roundSn.seleccionada_at && pendientes === 0) {
+        try { await options.sn.liberar({ emergenciaId }); }
+        catch { throw new AppError(502, 'SN_LIBERACION_FALLO', 'El Sistema Nacional no confirmó la liberación. El operativo no se cerró.'); }
+      }
+    }
     const saved = await prisma.$transaction(async tx => {
       const locked = await lockEmergency(tx, emergenciaId);
       if (locked.cerrada_at) conflict('EMERGENCIA_CERRADA', 'El operativo ya está cerrado.');
@@ -190,7 +236,11 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
           vence_at: new Date('9999-01-01T00:00:00Z') } });
       }
       if (action === 'ver-ofertas' || action === 'adjudicar') {
-        if (options.validationMode !== 'DESARROLLO') conflict('VALIDACION_PENDIENTE', 'La validación externa está pendiente. El modo de desarrollo debe habilitarse explícitamente.');
+        const ventanaSn = await tx.ventanaConvocatoria.findFirst({ where: { ronda_id: round.id }, orderBy: { abierta_at: 'desc' } });
+        const validacionesSn = ventanaSn
+          ? await tx.ofertaValidacion.findMany({ where: { ventana_id: ventanaSn.id } }) : [];
+        const hayValidacionSn = validacionesSn.length > 0;
+        if (!hayValidacionSn && options.validationMode !== 'DESARROLLO') conflict('VALIDACION_PENDIENTE', 'La validación externa está pendiente. El modo de desarrollo debe habilitarse explícitamente.');
         if (!round.publicada_at) conflict('ROUND_NOT_PUBLISHED', 'Primero debe publicarse la convocatoria.');
         if (!await selectionPermitted(round.id, emergenciaId, tx))
           conflict('SELECTION_NOT_READY', 'Falta evaluar la cobertura o confirmar la decisión de continuar parcialmente.');
@@ -210,7 +260,23 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
             if (sum > offer.lote.cantidad_requerida) throw new AppError(422, 'SELECTION_EXCEEDS_LOT', 'La selección supera la cantidad requerida de un lote.');
             totals.set(offer.lote_id, sum);
           }
-          await tx.adjudicacion.createMany({ data: ids.map(oferta_id => ({ oferta_id, municipio_id: actorId })) });
+          if (validacionesSn.length) {
+            const valPorOferta = new Map(validacionesSn.map(v => [v.oferta_id, v]));
+            const validaPorLote = new Map<string, number>();
+            for (const offer of offers) {
+              const v = valPorOferta.get(offer.id);
+              if (!v || v.resultado === 'SIN_CAPACIDAD')
+                throw new AppError(422, 'OFERTA_SIN_CAPACIDAD', 'Una oferta seleccionada no tiene capacidad validada por el Sistema Nacional.');
+              validaPorLote.set(offer.lote_id, (validaPorLote.get(offer.lote_id) ?? 0) + v.cantidad_valida);
+            }
+            for (const [loteId, total] of totals) {
+              if (total > (validaPorLote.get(loteId) ?? 0))
+                throw new AppError(422, 'SELECCION_SUPERA_VALIDADA', 'La selección supera la cantidad validada por el Sistema Nacional para un lote.');
+            }
+          }
+          await tx.adjudicacion.createMany({ data: ids.map(oferta_id => ({
+            oferta_id, municipio_id: actorId, sn_compromiso_id: snCompromisoPorOferta.get(oferta_id) ?? null,
+          })) });
           await tx.participacionOng.createMany({ data: [...new Set(offers.map(o => o.ong_usuario_id))].map(ong_usuario_id => ({ ronda_id: round.id, ong_usuario_id })) });
           await tx.ronda.update({ where: { id: round.id }, data: { seleccionada_at: now } });
           if (!client) await tx.ventanaConvocatoria.updateMany({ where: { ronda_id: round.id, cerrada_at: null }, data: { cerrada_at: now } });
@@ -299,6 +365,120 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
         participaciones: { include: { ong_usuario: { select: { id: true, nombre: true, organizacion: true } } } } } });
     return { data: { emergencia: { ...e, bonita_instance_id: e.bonita_instance_id?.toString() ?? null }, rondas, validationMode: options.validationMode } };
   }
+  const NIVEL_POR_GRAVEDAD: Record<string, string> = { BAJA: 'BAJO', MEDIA: 'MEDIO', ALTA: 'ALTO', CRITICA: 'CRITICO' };
+  const ORDEN_NIVEL = ['BAJO', 'MEDIO', 'ALTO', 'CRITICO'];
+  async function checkCallbackCase(emergenciaId: string, caseId: string, actividadId: string) {
+    if (!client) conflict('BONITA_DISABLED', 'Bonita está deshabilitado.');
+    const e = await emergency(emergenciaId);
+    if (e.bonita_instance_id?.toString() !== caseId) throw new AppError(403, 'BONITA_CASE_MISMATCH', 'El caso no corresponde a la emergencia.');
+    const recorded = await prisma.ventanaConvocatoria.findUnique({ where: { actividad_id: actividadId }, include: { ronda: true } });
+    if (recorded && recorded.ronda.emergencia_id !== emergenciaId) conflict('WINDOW_MISMATCH', 'La ventana pertenece a otra emergencia.');
+    await requireCompatible(caseId);
+    return { e, recorded };
+  }
+  /** Sincroniza al SN las ONGs que ofertaron (idempotente por externalId). */
+  async function syncOngsSn(ongIds: string[]) {
+    const sn = options.sn;
+    if (!sn || !ongIds.length) return;
+    const catalogo = await sn.getCertificaciones();
+    for (const ongId of ongIds) {
+      const [usuario, items] = await Promise.all([
+        prisma.usuario.findUnique({ where: { id: ongId }, select: { organizacion: true, nombre: true } }),
+        prisma.inventarioItem.findMany({ where: { ong_usuario_id: ongId, codigo_sn: { not: null } } }),
+      ]);
+      const porCodigo = new Map<string, number>();
+      for (const it of items) porCodigo.set(it.codigo_sn!, (porCodigo.get(it.codigo_sn!) ?? 0) + it.cantidad);
+      const certificaciones = [...porCodigo.keys()].map(codigo => {
+        const delTipo = catalogo.filter(c => c.tipoRecurso === codigo)
+          .sort((a, b) => ORDEN_NIVEL.indexOf(b.nivelRiesgoMax) - ORDEN_NIVEL.indexOf(a.nivelRiesgoMax))[0];
+        return delTipo ? { codigo: delTipo.codigo } : null;
+      }).filter(Boolean);
+      await sn.syncOng({
+        externalId: ongId,
+        nombre: usuario?.organizacion || usuario?.nombre || ongId,
+        estado: 'HABILITADA',
+        ...(certificaciones.length ? { certificaciones } : {}),
+        recursos: [...porCodigo.entries()].map(([tipoRecurso, total]) => ({ tipoRecurso, total })),
+      });
+    }
+  }
+  /** Arma el JSON de ofertas para que Bonita lo envíe al SN. Sincroniza ONGs antes. */
+  async function ofertasValidacion(emergenciaId: string, input: { caseId: string; actividadId: string }) {
+    const { e } = await checkCallbackCase(emergenciaId, input.caseId, input.actividadId);
+    const round = await prisma.ronda.findFirst({ where: { emergencia_id: emergenciaId }, orderBy: { numero: 'desc' } });
+    const ventana = await prisma.ventanaConvocatoria.findUnique({ where: { actividad_id: input.actividadId } });
+    if (!round || !ventana || ventana.ronda_id !== round.id) conflict('WINDOW_NOT_FOUND', 'Falta registrar la apertura de convocatoria.');
+    const ofertas = await prisma.oferta.findMany({
+      where: { activa: true, lote: { ronda_id: round.id } },
+      include: { inventario_item: { select: { codigo_sn: true } } },
+      orderBy: { id: 'asc' },
+    });
+    await syncOngsSn([...new Set(ofertas.map(o => o.ong_usuario_id))]);
+    const nivelRiesgo = NIVEL_POR_GRAVEDAD[e.gravedad] ?? 'BAJO';
+    return { data: {
+      emergenciaId, rondaId: round.id, ventanaId: ventana.id, nivelRiesgo,
+      ofertas: ofertas.filter(o => o.inventario_item?.codigo_sn).map(o => ({
+        ofertaId: o.id, ongId: o.ong_usuario_id, tipoRecurso: o.inventario_item!.codigo_sn!,
+        cantidad: o.cantidad_ofrecida, nivelRiesgo,
+      })),
+      sinMapeo: ofertas.filter(o => !o.inventario_item?.codigo_sn).map(o => o.id),
+    } };
+  }
+  /** Persiste la respuesta del SN (vía Bonita) y devuelve la cobertura para el XOR. */
+  async function validacionResultado(emergenciaId: string, input: { caseId: string; actividadId: string; resultados: SnResultadoValidacion[] }) {
+    await checkCallbackCase(emergenciaId, input.caseId, input.actividadId);
+    return prisma.$transaction(async tx => {
+      const locked = await lockEmergency(tx, emergenciaId);
+      if (locked.cerrada_at) conflict('EMERGENCIA_CERRADA', 'El operativo está cerrado.');
+      const round = await currentRound(tx, emergenciaId);
+      const ventana = await tx.ventanaConvocatoria.findUnique({ where: { actividad_id: input.actividadId } });
+      if (!ventana || ventana.ronda_id !== round.id) conflict('WINDOW_NOT_FOUND', 'Falta registrar la apertura de convocatoria.');
+      const existentes = await tx.ofertaValidacion.count({ where: { ventana_id: ventana.id } });
+      if (!existentes) {
+        const ofertas = await tx.oferta.findMany({
+          where: { activa: true, lote: { ronda_id: round.id } },
+          include: { lote: true, inventario_item: { select: { codigo_sn: true } } },
+        });
+        const porId = new Map(input.resultados.map(r => [r.ofertaId, r]));
+        for (const o of ofertas) {
+          const r = porId.get(o.id);
+          await tx.ofertaValidacion.create({ data: r ? {
+            ventana_id: ventana.id, oferta_id: o.id, resultado: r.resultado, cantidad_valida: r.cantidadValida,
+            nivel_riesgo_max: r.nivelRiesgoMax, disponible: r.disponible, motivo: r.motivo, apoyo: r.resultado === 'APOYO',
+          } : {
+            ventana_id: ventana.id, oferta_id: o.id, resultado: 'SIN_CAPACIDAD', cantidad_valida: 0,
+            nivel_riesgo_max: null, disponible: 0,
+            motivo: o.inventario_item?.codigo_sn ? 'Sin respuesta del Sistema Nacional' : 'Oferta sin código del Sistema Nacional en el inventario',
+          } });
+        }
+      }
+      const [lotes, validaciones] = await Promise.all([
+        tx.lote.findMany({ where: { ronda_id: round.id }, include: { ofertas: { where: { activa: true }, select: { id: true, cantidad_ofrecida: true } } }, orderBy: { id: 'asc' } }),
+        tx.ofertaValidacion.findMany({ where: { ventana_id: ventana.id } }),
+      ]);
+      const valPorOferta = new Map(validaciones.map(v => [v.oferta_id, v]));
+      const coverageLotes = lotes.map(l => {
+        const valida = l.ofertas.reduce((n, o) => n + (valPorOferta.get(o.id)?.apoyo ? 0
+          : ['COMPLETA', 'PARCIAL'].includes(valPorOferta.get(o.id)?.resultado ?? '') ? valPorOferta.get(o.id)!.cantidad_valida : 0), 0);
+        return { loteId: l.id, cantidadRequerida: l.cantidad_requerida,
+          cantidadOfrecida: l.ofertas.reduce((n, o) => n + o.cantidad_ofrecida, 0),
+          cantidadValida: valida, faltante: Math.max(0, l.cantidad_requerida - valida), cubierto: valida >= l.cantidad_requerida };
+      });
+      const coverage = { rondaId: round.id, lotes: coverageLotes,
+        lotesCubiertos: coverageLotes.length > 0 && coverageLotes.every(l => l.cubierto), origen: 'SN' as const };
+      await tx.ventanaConvocatoria.update({ where: { id: ventana.id }, data: { cerrada_at: new Date(), cobertura: coverage } });
+      return { data: coverage };
+    });
+  }
+  /** Validaciones SN persistidas de la ventana vigente (para la UI del municipio). */
+  async function listValidaciones(emergenciaId: string) {
+    await emergency(emergenciaId);
+    const round = await prisma.ronda.findFirst({ where: { emergencia_id: emergenciaId }, orderBy: { numero: 'desc' } });
+    if (!round) return { data: [] };
+    const ventana = await prisma.ventanaConvocatoria.findFirst({ where: { ronda_id: round.id }, orderBy: { abierta_at: 'desc' } });
+    if (!ventana) return { data: [] };
+    return { data: await prisma.ofertaValidacion.findMany({ where: { ventana_id: ventana.id }, orderBy: { created_at: 'asc' } }) };
+  }
   async function callback(emergenciaId: string, kind: 'abrir' | 'evaluar', input: { caseId: string; actividadId: string; duracionMs?: number }) {
     if (!client) conflict('BONITA_DISABLED', 'Bonita está deshabilitado.');
     const e = await emergency(emergenciaId);
@@ -340,6 +520,6 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
       return { data: coverage };
     });
   }
-  return { perform, reconcile, newRound, inspect, monitoring, callback,
+  return { perform, reconcile, newRound, inspect, monitoring, callback, ofertasValidacion, validacionResultado, listValidaciones,
     register: (emergenciaId: string, actorId: string) => perform(emergenciaId, actorId, 'registrar', { accionId: randomUUID() }) };
 }

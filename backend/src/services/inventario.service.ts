@@ -10,8 +10,9 @@ export async function listarInventario(prisma: PrismaClient, ongUsuarioId: strin
 }
 
 export async function crearInventario(prisma: PrismaClient, ongUsuarioId: string, input: CrearInventarioInput) {
+  const { codigoSn, ...rest } = input;
   return prisma.inventarioItem.create({
-    data: { ...input, ong_usuario_id: ongUsuarioId },
+    data: { ...rest, ...(codigoSn !== undefined ? { codigo_sn: codigoSn } : {}), ong_usuario_id: ongUsuarioId },
   });
 }
 
@@ -26,5 +27,9 @@ export async function actualizarInventario(
   if (item.ong_usuario_id !== ongUsuarioId) {
     throw new AppError(403, 'FORBIDDEN_OWNER', 'Solo el dueño puede editar el inventario.');
   }
-  return prisma.inventarioItem.update({ where: { id: itemId }, data: input });
+  const { codigoSn, ...rest } = input;
+  return prisma.inventarioItem.update({
+    where: { id: itemId },
+    data: { ...rest, ...(codigoSn !== undefined ? { codigo_sn: codigoSn } : {}) },
+  });
 }

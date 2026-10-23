@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { api, type Consorcio, type InventarioItem, type Lote, type Oferta } from '../api';
+import { api, type Consorcio, type InventarioItem, type Lote, type Oferta, type OfertaValidacion } from '../api';
 import { useApiData, useSubmission } from '../hooks';
 import { useDevUser } from '../auth-context';
 import { ErrorMessage, Field, Loading, Success, formatNumber } from '../ui';
@@ -134,7 +134,10 @@ function EditOfertaForm({ oferta, lote, onSaved }: { oferta: Oferta; lote: Lote;
   );
 }
 
-export function LoteCard({ lote, canOffer = false, onOfferSaved }: { lote: Lote; canOffer?: boolean; onOfferSaved?: () => void }) {
+export function LoteCard({ lote, canOffer = false, onOfferSaved, validaciones = [] }: {
+  lote: Lote; canOffer?: boolean; onOfferSaved?: () => void; validaciones?: OfertaValidacion[];
+}) {
+  const validacionPorOferta = new Map(validaciones.map(v => [v.oferta_id, v]));
   const { user } = useDevUser();
   const query = useApiData<Oferta[]>('/lotes/' + lote.id + '/ofertas');
   const [editingId, setEditingId] = useState<string>();
@@ -162,6 +165,16 @@ export function LoteCard({ lote, canOffer = false, onOfferSaved }: { lote: Lote;
                 </span>
               </div>
               <small className="muted">{oferta.ong_usuario.nombre}</small>
+              {validacionPorOferta.get(oferta.id) && (() => {
+                const v = validacionPorOferta.get(oferta.id)!;
+                return (
+                  <p className="notice">
+                    <strong>SN: {v.resultado}</strong>
+                    {v.apoyo ? ' (apoyo)' : ''} · válida {formatNumber(v.cantidad_valida)}
+                    {v.nivel_riesgo_max ? ` · riesgo máx ${v.nivel_riesgo_max}` : ''} — {v.motivo}
+                  </p>
+                );
+              })()}
               {oferta.observaciones && <p className="preserve">{oferta.observaciones}</p>}
               {user?.rol === 'ONG' && user.id === oferta.ong_usuario_id && canOffer && oferta.activa && !oferta.adjudicacion && (
                 <button type="button" className="secondary" onClick={() => setEditingId(oferta.id)}>

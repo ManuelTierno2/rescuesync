@@ -12,8 +12,9 @@ Plataforma para coordinar respuesta ante desastres: municipios, centro coordinad
 Documentación: [backend/README.md](backend/README.md), [frontend/README.md](frontend/README.md), [BONITA_WORKFLOW.md](BONITA_WORKFLOW.md), [BONITA_USUARIOS_LOCAL.md](BONITA_USUARIOS_LOCAL.md) (3 usuarios Bonita por actor), [IMPLEMENTACION.md](IMPLEMENTACION.md), [ENTREGA3.md](ENTREGA3.md) (Sistema Nacional, fuera de E2).
 
 Guía actual de arranque conjunto, pruebas y límites de la integración nacional:
-[PRUEBAS_INTEGRACION.md](PRUEBAS_INTEGRACION.md). El Sistema Nacional todavía no
-expone validación, reserva ni liberación; levantarlo no activa esas operaciones en Bonita.
+[PRUEBAS_INTEGRACION.md](PRUEBAS_INTEGRACION.md). El Sistema Nacional expone
+validación, compromiso y liberación; se integra vía Bonita 1.7 y el back
+cuando están configuradas las variables `SN_*` (ver [ENTREGA3.md](ENTREGA3.md)).
 
 ## Requisitos
 

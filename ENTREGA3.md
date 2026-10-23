@@ -1,50 +1,26 @@
-# Entrega 3 — Sistema Nacional (diferida)
+# Entrega 3 — Sistema Nacional (integrada)
 
-Esta entrega **no forma parte de la Entrega 2**. La app local usa `OFERTAS_VALIDACION_MODE=DESARROLLO|PENDIENTE` como sustituto explícito hasta implementar la API externa.
+Implementada: API del Sistema Nacional (`sistema_nacional/`) **integrada** con RescueSync y Bonita (proceso RescueSync **1.7**). `OFERTAS_VALIDACION_MODE=DESARROLLO` queda solo como modo degradado cuando no hay variables `SN_*` configuradas.
 
-## Objetivo
+## Qué hace la API SN (`sistema_nacional/`, puerto 3001)
 
-Desarrollar el **Sistema Nacional de Gestión de Recursos y Riesgos**: API RESTful con JWT, dockerizada (Render/Heroku u equivalente), documentación Swagger, repositorio y Dockerfile.
+- `POST /login` JWT; `POST /register` onboarding de ONGs (quedan `PENDIENTE`, un ADMIN habilita).
+- Catálogo: `GET /certificaciones`, `/tipos-recurso`, `/ongs`, `/recursos/disponibilidad`, `/recursos/:tipo`.
+- `POST /validaciones` → perfiles `COMPLETA`/`PARCIAL`/`APOYO`/`SIN_CAPACIDAD` con `cantidadValida`, `nivelRiesgoMax`, `disponible`, `motivo`.
+- `POST /compromisos` (bloqueo transaccional `FOR UPDATE`, idempotente) y `POST /compromisos/liberar`.
+- Swagger en `/docs` y `/openapi.json`; despliegue Docker/Render (`render.yaml`).
 
-## Servicios mínimos obligatorios
+## Integración RescueSync + Bonita
 
-1. **Autenticación y gestión de cuentas**
-   - `POST /login` con JWT
-   - Registro/onboarding de ONGs
+1. Al vencer la ventana, la Service Task **Validacion de ofertas** (Bonita 1.7) ejecuta 4 conectores `rest-post`:
+   `POST {back}/convocatoria/ofertas-validacion` (el back sincroniza las ONGs al SN y devuelve el JSON de ofertas) →
+   `POST {sn}/login` → `POST {sn}/validaciones` → `POST {back}/convocatoria/validacion-resultado` (persiste `OfertaValidacion`, recalcula cobertura y devuelve `lotesCubiertos` para el XOR).
+2. Los ítems de inventario llevan `codigoSn` (`PARAMEDICO`, `RACION_ALIMENTO`, `AGUA_POTABLE`, `KIT_MEDICO`, `VEHICULO_RESCATE`); las ofertas sin mapeo se validan como `SIN_CAPACIDAD`.
+3. El municipio ve el perfil SN por oferta antes de adjudicar; no se puede adjudicar `SIN_CAPACIDAD` ni superar la suma de `cantidadValida` por lote.
+4. Al adjudicar, el back llama `POST /compromisos` por (lote, ONG) **antes** de escribir la adjudicación; un 409 del SN cancela todo. Al cerrar, llama `POST /compromisos/liberar` antes de marcar `cerrada_at`.
+5. Configuración: `SN_API_URL`, `SN_ADMIN_EMAIL`, `SN_ADMIN_PASSWORD` en `backend/.env`; credenciales de Bonita Studio en los parámetros de proceso `snUrl`, `snAdminEmail`, `snAdminPassword` (nunca en el repo).
 
-2. **Catálogo y consulta**
-   - Certificaciones
-   - ONGs habilitadas
-   - Disponibilidad global de recursos
+## Pendientes manuales
 
-3. **Validación por niveles de competencia**
-   - Respuestas estructuradas con capacidades habilitadas y niveles de riesgo permitidos
-   - Evitar rechazo punitivo binario
-
-4. **Control de concurrencia y bloqueo**
-   - Validar restricciones
-   - Bloqueo/compromiso transaccional al adjudicar
-   - Locking en PostgreSQL contra race conditions
-
-5. **Liberación y cierre**
-   - Reportar finalización de actividades ONG
-   - Cerrar proyecto y liberar recursos bloqueados a nivel nacional
-
-## Enganche con RescueSync / Bonita
-
-En el BPM RescueSync 1.5, las Service Tasks de la lane **Sistema Nacional** son el punto de integración futuro:
-
-- Validacion de ofertas
-- Registrar compromiso de recursos
-- (y, en diseños ampliados) clasificación, liberación, notificación)
-
-Hoy **no tienen conectores reales**. La Entrega 3 debe:
-
-1. Publicar la API SN documentada (Swagger).
-2. Conectar desde Bonita o desde el backend RescueSync tras adjudicación/cierre.
-3. Reemplazar `OFERTAS_VALIDACION_MODE=DESARROLLO` por llamadas reales de validación por niveles.
-4. Ejecutar compromiso al adjudicar y liberación al finalizar/cerrar.
-
-## Criterio de no-alcance para Entrega 2
-
-Cualquier mock local en RescueSync debe identificarse como desarrollo y **no** presentarse como Sistema Nacional desplegado.
+- Despliegue real del SN en Render (hay `render.yaml`, falta publicar la URL) y credenciales ADMIN de laboratorio para el equipo.
+- En Bonita Studio: cargar `snAdminPassword`, deploy de RescueSync 1.7 y actualizar `BONITA_PROCESS_ID`.

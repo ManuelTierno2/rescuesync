@@ -34,6 +34,7 @@ export function createWorkflowRouter(prisma: PrismaClient, bonita: BonitaService
   const { requireAuth } = createAuthMiddleware(prisma, authConfig);
   router.use((req, res, next) => { res.locals.emergenciaId = parse(uuid, req.params.id); next(); });
   router.get('/workflow', async (_req, res) => { res.json(await service.inspect(res.locals.emergenciaId)); });
+  router.get('/validaciones', async (_req, res) => { res.json(await service.listValidaciones(res.locals.emergenciaId)); });
   router.get('/cobertura', async (_req, res) => { res.json({ data: await calculateCoverage(prisma, res.locals.emergenciaId) }); });
   router.get('/monitoreo', async (_req, res) => { res.json(await service.monitoring(res.locals.emergenciaId)); });
   for (const action of Object.keys(taskNames) as Action[]) {
@@ -70,6 +71,22 @@ export function createBonitaCallbacks(prisma: PrismaClient, bonita: BonitaServic
       ...(kind === 'abrir' ? { duracionMs: z.number().int().min(1).max(604800000) } : {}),
     }).strict(), req.body);
     res.json(await service.callback(parse(uuid, req.params.id), kind, input as { caseId: string; actividadId: string; duracionMs?: number }));
+  });
+  const baseCallback = z.object({ caseId: z.string().refine(isBonitaId), actividadId: z.string().refine(isBonitaId) }).strict();
+  router.post('/emergencias/:id/convocatoria/ofertas-validacion', async (req, res) => {
+    res.json(await service.ofertasValidacion(parse(uuid, req.params.id), parse(baseCallback, req.body)));
+  });
+  router.post('/emergencias/:id/convocatoria/validacion-resultado', async (req, res) => {
+    const input = parse(baseCallback.extend({
+      resultados: z.array(z.object({
+        ofertaId: uuid, ongId: z.union([z.string(), z.number()]), tipoRecurso: z.string(),
+        cantidad: z.number().int(), nivelRiesgo: z.string(),
+        resultado: z.enum(['COMPLETA', 'PARCIAL', 'APOYO', 'SIN_CAPACIDAD']),
+        cantidadValida: z.number().int().min(0), nivelRiesgoMax: z.string().nullable(),
+        disponible: z.number().int(), motivo: z.string(),
+      }).strict()).max(500),
+    }), req.body);
+    res.json(await service.validacionResultado(parse(uuid, req.params.id), input));
   });
   return router;
 }

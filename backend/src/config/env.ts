@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
 import { isBonitaId, type BonitaConfig } from '../integrations/bonita/bonita.client.js';
+import type { SnConfig } from '../integrations/sistema-nacional/sn.client.js';
 
 export class EnvError extends Error {
   constructor(fields: string[]) {
@@ -29,6 +30,10 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET debe tener al menos 32 caracteres.'),
   JWT_EXPIRES_IN: z.string().trim().min(1).default('8h'),
   AUTH_ALLOW_DEV_HEADER: z.enum(['true', 'false']).optional(),
+  SN_API_URL: z.string().default(''),
+  SN_ADMIN_EMAIL: z.string().default(''),
+  SN_ADMIN_PASSWORD: z.string().default(''),
+  SN_TIMEOUT_MS: z.coerce.number().int().min(1).max(60000).default(10000),
 });
 
 const bonitaSchema = z.object({
@@ -79,12 +84,20 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env) {
       timeoutMs: settings.data.BONITA_TIMEOUT_MS,
     };
   }
+  let sn: SnConfig = { enabled: false };
+  const snFields = [result.data.SN_API_URL, result.data.SN_ADMIN_EMAIL, result.data.SN_ADMIN_PASSWORD];
+  if (snFields.some(v => v !== '')) {
+    const okUrl = z.url().safeParse(result.data.SN_API_URL).success;
+    if (!okUrl || snFields.some(v => v === '')) throw new EnvError(['SN_API_URL', 'SN_ADMIN_EMAIL', 'SN_ADMIN_PASSWORD']);
+    sn = { enabled: true, url: result.data.SN_API_URL, adminEmail: result.data.SN_ADMIN_EMAIL, adminPassword: result.data.SN_ADMIN_PASSWORD, timeoutMs: result.data.SN_TIMEOUT_MS };
+  }
   const allowDevHeader = result.data.AUTH_ALLOW_DEV_HEADER
     ? result.data.AUTH_ALLOW_DEV_HEADER === 'true'
     : result.data.NODE_ENV === 'test';
   return {
     ...result.data,
     bonita,
+    sn,
     auth: {
       jwtSecret: result.data.JWT_SECRET,
       jwtExpiresIn: result.data.JWT_EXPIRES_IN,

@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { readEnv, EnvError } from './config/env.js';
 import { createPrismaClient } from './database/prisma.js';
 import { createBonitaService } from './integrations/bonita/bonita.service.js';
+import { createSnClient } from './integrations/sistema-nacional/sn.client.js';
 
 async function main() {
   const env = readEnv();
@@ -15,6 +16,7 @@ async function main() {
     const server = createServer(createApp(prisma, createBonitaService(env.bonita), {
       compatibleProcessIds: env.BONITA_WORKFLOW_PROCESS_IDS.split(',').map(id => id.trim()).filter(Boolean),
       callbackSecret: env.BONITA_CALLBACK_SECRET, validationMode: env.OFERTAS_VALIDACION_MODE,
+      ...(env.sn.enabled ? { sn: createSnClient(env.sn) } : {}),
     }, 'http://localhost:5173', env.auth));
     server.listen(env.PORT);
     await once(server, 'listening');
