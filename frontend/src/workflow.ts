@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type Emergencia, type Lote, type Oferta, type Usuario, type Warning } from './api';
+import { api, type Emergencia, type Lote, type Oferta, type OfertaValidacion, type Usuario, type Warning } from './api';
 export interface Round {
   id: string; numero: number; publicada_at: string | null; seleccionada_at: string | null;
   ofertas_vistas_at: string | null; monitoreo_finalizado_at: string | null;
@@ -7,12 +7,12 @@ export interface Round {
 export interface Participation { ong_usuario_id: string; ong_usuario: Usuario; lectura_at: string | null; finalizada_at: string | null }
 export interface Workflow {
   enabled: boolean; caseId: string | null; state: string; compatible: boolean; localClosed: boolean;
-  validationMode: 'PENDIENTE' | 'DESARROLLO'; round: Round | null;
+  validationMode: 'PENDIENTE' | 'DESARROLLO'; validacionSn: boolean; seleccionHabilitada: boolean; round: Round | null;
   readyTasks: { id: string; name: string; ongUsuarioId?: string }[]; availableActions: string[];
   windows: { id: string; vence_at: string; cerrada_at: string | null }[];
   actions: { id: string; accion: string; actor_id: string; estado: string; task_id: string | null }[];
 }
-export interface Monitoring { emergencia: Emergencia; rondas: (Round & { lotes: (Lote & { ofertas: Oferta[] })[]; participaciones: Participation[] })[] }
+export interface Monitoring { emergencia: Emergencia; rondas: (Round & { lotes: (Lote & { ofertas: (Oferta & { validacion_actual?: OfertaValidacion | null })[] })[]; participaciones: Participation[] })[] }
 export function useWorkflow(id: string) {
   const [data, setData] = useState<Workflow>();
   const [monitoring, setMonitoring] = useState<Monitoring>();

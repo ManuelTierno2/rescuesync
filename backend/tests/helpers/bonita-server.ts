@@ -21,6 +21,8 @@ const USER_IDS: Record<string, string> = {
 export interface StubOptions {
   loginStatus?: number; processStatus?: number; startStatus?: number; logoutStatus?: number;
   definition?: Record<string, unknown>; startBody?: string; delayStartMs?: number;
+  /** Agrega la tarea inicial con este retraso tras la instanciación (Bonita la expone de forma asíncrona). */
+  delayRegisterTaskMs?: number;
   missingCookie?: 'JSESSIONID' | 'X-Bonita-API-Token'; onStart?: () => Promise<void>;
   taskStatus?: number; executionStatus?: number; delayTaskMs?: number; delayExecutionMs?: number;
   searchOverride?: unknown[]; contractOverride?: unknown; onExecution?: (task: StubTask) => Promise<void>;
@@ -191,7 +193,8 @@ export async function bonitaServer(options: StubOptions = {}) {
         if (options.delayStartMs) await setTimeout(options.delayStartMs);
         res.statusCode = options.startStatus ?? 201;
         const caseId = /"caseId"\s*:\s*"?(\d+)/.exec(options.startBody ?? '{"caseId":"9223372036854775806"}')?.[1];
-        if (caseId) addTask(caseId, 'Registrar emergencia');
+        if (caseId && options.delayRegisterTaskMs) void setTimeout(options.delayRegisterTaskMs).then(() => addTask(caseId, 'Registrar emergencia'));
+        else if (caseId) addTask(caseId, 'Registrar emergencia');
         res.end(options.startBody ?? '{"caseId":"9223372036854775806"}');
       } else if (path === '/bonita/logoutservice?redirect=false') {
         sessions.delete(sessionId!);

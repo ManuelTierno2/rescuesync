@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '../generated/prisma/client.js';
+import type { TipoLote } from '../generated/prisma/enums.js';
 import { AppError } from '../errors/app-error.js';
 import type { ActualizarOfertaInput, CrearOfertaInput } from '../validators/ofertas.schema.js';
 import { obtenerLote } from './lotes.service.js';
@@ -25,11 +26,28 @@ async function validateConsorcio(tx: Prisma.TransactionClient, consorcioId: stri
   if (!member) throw new AppError(422, 'INVALID_CONSORCIO', 'El consorcio no existe o no pertenece al usuario ONG.');
 }
 
-async function validateInventario(tx: Prisma.TransactionClient, itemId: string | null | undefined, ongUsuarioId: string, cantidad: number) {
-  if (!itemId) return;
+/**
+ * Toda oferta debe respaldarse en un ítem de inventario con código del Sistema Nacional.
+ * La disponibilidad global y la concurrencia entre emergencias las arbitra el SN (validación y
+ * compromiso), por eso aquí solo se comprueba la coherencia de lo que declara la ONG.
+ */
+async function validateInventario(
+  tx: Prisma.TransactionClient,
+  itemId: string | null | undefined,
+  ongUsuarioId: string,
+  cantidad: number,
+  tipoLote: TipoLote,
+) {
+  if (!itemId) throw new AppError(422, 'INVENTARIO_REQUERIDO', 'La oferta debe vincular un ítem de su inventario.');
   const item = await tx.inventarioItem.findUnique({ where: { id: itemId } });
   if (!item || item.ong_usuario_id !== ongUsuarioId) {
     throw new AppError(422, 'INVALID_INVENTARIO', 'El ítem de inventario no existe o no pertenece al usuario ONG.');
+  }
+  if (!item.codigo_sn) {
+    throw new AppError(422, 'CODIGO_SN_REQUERIDO', 'El ítem de inventario no tiene código del Sistema Nacional. Asígnelo antes de ofertar.');
+  }
+  if (item.tipo !== tipoLote) {
+    throw new AppError(422, 'TIPO_INCOMPATIBLE', `El lote es de tipo ${tipoLote} y el ítem es de tipo ${item.tipo}.`);
   }
   if (item.cantidad < cantidad) {
     throw new AppError(422, 'INSUFFICIENT_STOCK', 'La cantidad ofrecida supera el stock del inventario.');
@@ -51,7 +69,7 @@ export async function crearOferta(prisma: PrismaClient, loteId: string, input: C
     return await prisma.$transaction(async tx => {
       await assertOpenWindow(tx, lote);
       await validateConsorcio(tx, input.consorcio_id, input.ong_usuario_id);
-      await validateInventario(tx, input.inventario_item_id, input.ong_usuario_id, input.cantidad_ofrecida);
+      await validateInventario(tx, input.inventario_item_id, input.ong_usuario_id, input.cantidad_ofrecida, lote.tipo);
       const oferta = await tx.oferta.create({
         data: {
           lote_id: loteId,
@@ -98,13 +116,15 @@ export async function actualizarOferta(prisma: PrismaClient, ofertaId: string, a
       throw new AppError(409, 'OFERTA_LOCKED', 'La oferta no puede editarse porque está inactiva o adjudicada.');
     }
     await assertOpenWindow(tx, oferta.lote);
-    await validateInventario(tx, oferta.inventario_item_id, actorId, input.cantidad_ofrecida);
+    const inventarioId = input.inventario_item_id ?? oferta.inventario_item_id;
+    await validateInventario(tx, inventarioId, actorId, input.cantidad_ofrecida, oferta.lote.tipo);
     const version = oferta.version + 1;
     const updated = await tx.oferta.update({
       where: { id: ofertaId },
       data: {
         cantidad_ofrecida: input.cantidad_ofrecida,
         observaciones: input.observaciones,
+        inventario_item_id: inventarioId,
         version,
       },
       include,

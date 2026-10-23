@@ -124,14 +124,14 @@ Anotá la URL del detalle (`/emergencias/<uuid>`).
 
 ---
 
-## 3. ONG — inventario (opcional) y ofertas
+## 3. ONG — inventario (obligatorio) y ofertas
 
 1. Login `ong.a@rescuesync.test`.
-2. (Opcional) Ir a **/inventario**, dar de alta un ítem (ej. 500 raciones).
+2. Ir a **/inventario** y dar de alta un ítem por lote con su código SN elegido del desplegable (ej. 500 raciones → `RACION_ALIMENTO`; 5 personas → `PARAMEDICO`; el código no depende del tipo). Toda oferta exige un ítem del mismo tipo que el lote.
 3. (Opcional) Ir a **/consorcios** y crear uno si querés probar ofertas conjuntas.
 4. Volver al detalle de la emergencia.
-5. En **Raciones de alimento**: ofrecer `400`, observaciones, enviar.
-6. En **Paramédicos**: ofrecer `2`, enviar.
+5. En **Raciones de alimento**: elegir el ítem de inventario, ofrecer `400`, observaciones, enviar.
+6. En **Paramédicos**: elegir el ítem de personal, ofrecer `2`, enviar.
 7. (Opcional) Editar una oferta y verificar que sube la **versión** (v2).
 8. **Esperado:** las ofertas aparecen bajo cada lote.
 

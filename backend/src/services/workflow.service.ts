@@ -325,7 +325,10 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
     const round = await prisma.ronda.findFirst({ where: { emergencia_id: emergenciaId }, orderBy: { numero: 'desc' } });
     const actions = await prisma.accionWorkflow.findMany({ where: { emergencia_id: emergenciaId }, orderBy: { created_at: 'asc' } });
     const windows = round ? await prisma.ventanaConvocatoria.findMany({ where: { ronda_id: round.id }, orderBy: { abierta_at: 'desc' } }) : [];
-    const data = { enabled: !!client, caseId: e.bonita_instance_id?.toString() ?? null,
+    // La selección se habilita si el SN ya validó la ventana vigente (o, solo en desarrollo, sin validación).
+    const validacionSn = windows[0] ? (await prisma.ofertaValidacion.count({ where: { ventana_id: windows[0].id } })) > 0 : false;
+    const seleccionHabilitada = validacionSn || options.validationMode === 'DESARROLLO';
+    const data = { enabled: !!client, caseId: e.bonita_instance_id?.toString() ?? null, validacionSn, seleccionHabilitada,
       state: !client ? 'DISABLED' : !e.bonita_instance_id ? 'UNLINKED' : 'UNKNOWN', readyTasks: [] as (HumanTask & { ongUsuarioId?: string })[],
       compatible: !client, availableActions: [] as string[], round, windows, actions, localClosed: !!e.cerrada_at, validationMode: options.validationMode };
     const warnings: { code: string; message: string }[] = [];
@@ -344,7 +347,7 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
               && data.readyTasks.some(t => t.name === name)).map(([key]) => key);
           if (data.compatible) {
             data.availableActions.push('leer', 'cerrar');
-            if (options.validationMode === 'DESARROLLO' && round && await selectionPermitted(round.id, emergenciaId)
+            if (seleccionHabilitada && round && await selectionPermitted(round.id, emergenciaId)
               && !data.readyTasks.some(t => [taskNames.publicar, taskNames.decidir, 'Cargar o editar ofertas'].includes(t.name)))
               data.availableActions.push('ver-ofertas', 'adjudicar');
           }
@@ -353,6 +356,9 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
             data.availableActions = ['nueva-ronda'];
           }
           if (!data.compatible) warnings.push({ code: 'BPMN_INCOMPATIBLE', message: 'Los tramos posteriores al registro requieren verificar y desplegar los cambios manuales de Studio.' });
+        } else if (state.state === 'COMPLETED' && !e.cerrada_at && round?.seleccionada_at) {
+          // El caso termina con la última actividad ONG; el cierre del operativo (y la liberación en el SN) es local y sigue pendiente.
+          data.availableActions = ['cerrar'];
         }
       } catch (error) { warnings.push(integrationWarning(error)); }
     } else if (!client && !e.cerrada_at) data.availableActions = ['publicar', 'ver-ofertas', 'adjudicar', 'leer', 'finalizar-actividad', 'finalizar-monitoreo', 'cerrar'];
@@ -363,7 +369,18 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
     const rondas = await prisma.ronda.findMany({ where: { emergencia_id: emergenciaId }, orderBy: { numero: 'desc' },
       include: { lotes: { include: { ofertas: { include: { adjudicacion: true, ong_usuario: { select: { id: true, nombre: true, organizacion: true } } } } } },
         participaciones: { include: { ong_usuario: { select: { id: true, nombre: true, organizacion: true } } } } } });
-    return { data: { emergencia: { ...e, bonita_instance_id: e.bonita_instance_id?.toString() ?? null }, rondas, validationMode: options.validationMode } };
+    // Validación del SN de la ventana más reciente de cada ronda, expuesta por oferta como `validacion_actual`.
+    const ventanas = await prisma.ventanaConvocatoria.findMany({ where: { ronda_id: { in: rondas.map(r => r.id) } }, orderBy: { abierta_at: 'desc' } });
+    const ultimaPorRonda = new Map<string, string>();
+    for (const v of ventanas) if (!ultimaPorRonda.has(v.ronda_id)) ultimaPorRonda.set(v.ronda_id, v.id);
+    const validaciones = await prisma.ofertaValidacion.findMany({ where: { ventana_id: { in: [...ultimaPorRonda.values()] } } });
+    const valPorOferta = new Map(validaciones.map(v => [v.oferta_id, v]));
+    const rondasConValidacion = rondas.map(r => ({ ...r, lotes: r.lotes.map(l => ({ ...l,
+      ofertas: l.ofertas.map(o => {
+        const v = valPorOferta.get(o.id);
+        return { ...o, validacion_actual: v && v.ventana_id === ultimaPorRonda.get(r.id) ? v : null };
+      }) })) }));
+    return { data: { emergencia: { ...e, bonita_instance_id: e.bonita_instance_id?.toString() ?? null }, rondas: rondasConValidacion, validationMode: options.validationMode } };
   }
   const NIVEL_POR_GRAVEDAD: Record<string, string> = { BAJA: 'BAJO', MEDIA: 'MEDIO', ALTA: 'ALTO', CRITICA: 'CRITICO' };
   const ORDEN_NIVEL = ['BAJO', 'MEDIO', 'ALTO', 'CRITICO'];
@@ -376,10 +393,15 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
     await requireCompatible(caseId);
     return { e, recorded };
   }
-  /** Sincroniza al SN las ONGs que ofertaron (idempotente por externalId). */
-  async function syncOngsSn(ongIds: string[]) {
+  /**
+   * Sincroniza al SN las ONGs que ofertaron (idempotente por externalId).
+   * Si el SN rechaza a una ONG (p. ej. 409 por total menor a lo bloqueado) no se aborta toda la validación:
+   * se devuelve el motivo por ONG. Si el SN no responde o rechaza las credenciales sí es fatal (502).
+   */
+  async function syncOngsSn(ongIds: string[]): Promise<Map<string, string>> {
+    const rechazadas = new Map<string, string>();
     const sn = options.sn;
-    if (!sn || !ongIds.length) return;
+    if (!sn || !ongIds.length) return rechazadas;
     const catalogo = await sn.getCertificaciones();
     for (const ongId of ongIds) {
       const [usuario, items] = await Promise.all([
@@ -393,14 +415,22 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
           .sort((a, b) => ORDEN_NIVEL.indexOf(b.nivelRiesgoMax) - ORDEN_NIVEL.indexOf(a.nivelRiesgoMax))[0];
         return delTipo ? { codigo: delTipo.codigo } : null;
       }).filter(Boolean);
-      await sn.syncOng({
-        externalId: ongId,
-        nombre: usuario?.organizacion || usuario?.nombre || ongId,
-        estado: 'HABILITADA',
-        ...(certificaciones.length ? { certificaciones } : {}),
-        recursos: [...porCodigo.entries()].map(([tipoRecurso, total]) => ({ tipoRecurso, total })),
-      });
+      try {
+        await sn.syncOng({
+          externalId: ongId,
+          nombre: usuario?.organizacion || usuario?.nombre || ongId,
+          estado: 'HABILITADA',
+          ...(certificaciones.length ? { certificaciones } : {}),
+          recursos: [...porCodigo.entries()].map(([tipoRecurso, total]) => ({ tipoRecurso, total })),
+        });
+      } catch (error) {
+        // Solo un rechazo funcional (4xx) es por ONG; 5xx/red son fallos del SN y abortan.
+        const rechazoFuncional = error instanceof SnError && error.code === 'SN_SYNC_FAILED' && (error.status ?? 0) < 500;
+        if (rechazoFuncional) rechazadas.set(ongId, (error as SnError).message);
+        else throw error;
+      }
     }
+    return rechazadas;
   }
   /** Arma el JSON de ofertas para que Bonita lo envíe al SN. Sincroniza ONGs antes. */
   async function ofertasValidacion(emergenciaId: string, input: { caseId: string; actividadId: string }) {
@@ -413,15 +443,27 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
       include: { inventario_item: { select: { codigo_sn: true } } },
       orderBy: { id: 'asc' },
     });
-    await syncOngsSn([...new Set(ofertas.map(o => o.ong_usuario_id))]);
+    const rechazadas = await syncOngsSn([...new Set(ofertas.map(o => o.ong_usuario_id))]);
+    // Las ofertas de una ONG que el SN rechazó quedan SIN_CAPACIDAD con el motivo real del SN.
+    for (const o of ofertas.filter(o => rechazadas.has(o.ong_usuario_id))) {
+      const motivo = rechazadas.get(o.ong_usuario_id)!;
+      await prisma.ofertaValidacion.upsert({
+        where: { ventana_id_oferta_id: { ventana_id: ventana.id, oferta_id: o.id } },
+        update: { motivo },
+        create: { ventana_id: ventana.id, oferta_id: o.id, resultado: 'SIN_CAPACIDAD', cantidad_valida: 0,
+          nivel_riesgo_max: null, disponible: 0, motivo },
+      });
+    }
     const nivelRiesgo = NIVEL_POR_GRAVEDAD[e.gravedad] ?? 'BAJO';
+    const validables = ofertas.filter(o => o.inventario_item?.codigo_sn && !rechazadas.has(o.ong_usuario_id));
     return { data: {
       emergenciaId, rondaId: round.id, ventanaId: ventana.id, nivelRiesgo,
-      ofertas: ofertas.filter(o => o.inventario_item?.codigo_sn).map(o => ({
+      ofertas: validables.map(o => ({
         ofertaId: o.id, ongId: o.ong_usuario_id, tipoRecurso: o.inventario_item!.codigo_sn!,
         cantidad: o.cantidad_ofrecida, nivelRiesgo,
       })),
       sinMapeo: ofertas.filter(o => !o.inventario_item?.codigo_sn).map(o => o.id),
+      rechazadasPorSn: ofertas.filter(o => rechazadas.has(o.ong_usuario_id)).map(o => o.id),
     } };
   }
   /** Persiste la respuesta del SN (vía Bonita) y devuelve la cobertura para el XOR. */
@@ -433,12 +475,15 @@ export function createWorkflowService(prisma: PrismaClient, bonita: BonitaServic
       const round = await currentRound(tx, emergenciaId);
       const ventana = await tx.ventanaConvocatoria.findUnique({ where: { actividad_id: input.actividadId } });
       if (!ventana || ventana.ronda_id !== round.id) conflict('WINDOW_NOT_FOUND', 'Falta registrar la apertura de convocatoria.');
-      const existentes = await tx.ofertaValidacion.count({ where: { ventana_id: ventana.id } });
-      if (!existentes) {
-        const ofertas = await tx.oferta.findMany({
+      // Idempotente: solo se crean las filas que faltan (las de ONGs rechazadas por el SN ya existen).
+      const existentes = new Set((await tx.ofertaValidacion.findMany({
+        where: { ventana_id: ventana.id }, select: { oferta_id: true },
+      })).map(v => v.oferta_id));
+      {
+        const ofertas = (await tx.oferta.findMany({
           where: { activa: true, lote: { ronda_id: round.id } },
           include: { lote: true, inventario_item: { select: { codigo_sn: true } } },
-        });
+        })).filter(o => !existentes.has(o.id));
         const porId = new Map(input.resultados.map(r => [r.ofertaId, r]));
         for (const o of ofertas) {
           const r = porId.get(o.id);

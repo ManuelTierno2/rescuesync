@@ -149,7 +149,7 @@ Login JWT (password `demo1234`):
 
 1. Login como **MUNICIPIO** → registrar emergencia.
 2. Login **COORDINADOR** → crear lotes → **Publicar convocatoria**.
-3. Login **ONG** → inventario / consorcios (opcional) → cargar u editar ofertas (versionado).
+3. Login **ONG** → cargar en **/inventario** ítems con un código del Sistema Nacional (obligatorio; el desplegable lista el catálogo que publica el SN) → ofertar eligiendo un ítem del mismo tipo que el lote (si el ítem no tiene código, el formulario lo pide y lo guarda) → editar ofertas (versionado). Consorcios son opcionales.
 4. Con `OFERTAS_VALIDACION_MODE=DESARROLLO`, municipio adjudica; ONG lee y finaliza; coordinador monitorea y cierra.
 
 ## Bonita (opcional)

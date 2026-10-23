@@ -68,11 +68,28 @@ test('flujo completo por roles y persistencia después de refrescar', async ({ p
   await loginAs(page, 'ong');
   await page.goto(detailUrl);
   await expect(page.getByRole('heading', { name: 'Crear lote', exact: true })).toHaveCount(0);
+  // Toda oferta se respalda en un ítem de inventario con código del Sistema Nacional.
+  await page.goto('/inventario');
+  for (const [tipo, descripcion, cantidad, unidad, codigo] of [
+    ['RECURSO', 'Raciones de alimento', '1000', 'raciones', 'RACION_ALIMENTO'],
+    ['PERSONAL', 'Paramédicos', '5', 'personas', 'PARAMEDICO'],
+  ]) {
+    await page.getByLabel('Tipo', { exact: true }).selectOption(tipo);
+    await page.getByLabel('Descripción', { exact: true }).fill(`${process.env.BROWSER_TEST_RUN_ID} ${descripcion}`);
+    await page.getByLabel('Cantidad', { exact: true }).fill(cantidad);
+    await page.getByLabel('Unidad', { exact: true }).fill(unidad);
+    await page.getByLabel('Código Sistema Nacional').selectOption(codigo);
+    await page.getByRole('button', { name: 'Agregar', exact: true }).click();
+    await expect(page.getByText('Ítem agregado.', { exact: true })).toBeVisible();
+  }
+  await page.goto(detailUrl);
   for (const [descripcion, cantidad] of [
     ['Raciones de alimento', '400'],
     ['Paramédicos', '2'],
   ]) {
     const card = page.getByRole('article', { name: descripcion });
+    const option = card.getByRole('option', { name: new RegExp(`${process.env.BROWSER_TEST_RUN_ID} ${descripcion}`) });
+    await card.getByLabel('Ítem de inventario').selectOption((await option.getAttribute('value'))!);
     await card.getByLabel('Cantidad ofrecida', { exact: false }).fill(cantidad);
     await card.getByLabel('Observaciones', { exact: false }).fill('Entrega inmediata');
     await card.getByRole('button', { name: 'Enviar oferta' }).click();

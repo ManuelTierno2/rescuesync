@@ -17,7 +17,8 @@ await promisify(execFile)(process.execPath, ['node_modules/prisma/build/index.js
 });
 await seedUsuarios(prisma);
 const server = createServer(createApp(prisma, undefined, { compatibleProcessIds: [], callbackSecret: '', validationMode: 'DESARROLLO' }, 'http://localhost:5174'));
-server.listen(3001, '127.0.0.1', () => console.log('Browser test API ready on 3001'));
+const port = Number(process.env.E2E_API_PORT ?? 3001);
+server.listen(port, '127.0.0.1', () => console.log(`Browser test API ready on ${port}`));
 const shutdown = () => server.close(() => { void prisma.$disconnect(); });
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);

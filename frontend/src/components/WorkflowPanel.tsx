@@ -41,14 +41,23 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
   const myParticipation = round?.participaciones.find(p => p.ong_usuario_id === user?.id);
   const lots = round?.lotes ?? [];
   const overflow = lots.some(l => l.ofertas.filter(o => selection.includes(o.id)).reduce((n, o) => n + o.cantidad_ofrecida, 0) > l.cantidad_requerida);
+  // Cantidad que el SN validó como cobertura (COMPLETA/PARCIAL); APOYO no cuenta, igual que en el back.
+  const cubierta = (o: { validacion_actual?: { resultado: string; cantidad_valida: number } | null }) =>
+    o.validacion_actual && ['COMPLETA', 'PARCIAL'].includes(o.validacion_actual.resultado) ? o.validacion_actual.cantidad_valida : 0;
+  const sinCapacidad = (o: { validacion_actual?: { resultado: string } | null }) => o.validacion_actual?.resultado === 'SIN_CAPACIDAD';
+  const supera = lots.some(l => {
+    const sel = l.ofertas.filter(o => selection.includes(o.id));
+    return sel.some(o => o.validacion_actual)
+      && sel.reduce((n, o) => n + o.cantidad_ofrecida, 0) > sel.reduce((n, o) => n + (o.validacion_actual?.cantidad_valida ?? 0), 0);
+  });
   const available = (action: string) => data.availableActions.includes(decisions[action] ? 'decidir' : action) && roles[action] === user?.rol && !query.error
     && (user?.rol !== 'MUNICIPIO' || monitoring?.emergencia.creada_por_id === user.id);
   function allowed(action: string) {
     if (data!.localClosed) return false;
     if (action === 'continuar-parcial') return lots.some(l => l.ofertas.some(o => o.activa && o.cantidad_ofrecida > 0));
     if (action === 'publicar') return !!lots.length && !round?.publicada_at;
-    if (action === 'ver-ofertas') return !!round?.publicada_at && !round.ofertas_vistas_at && data!.validationMode === 'DESARROLLO';
-    if (action === 'adjudicar') return !!round?.ofertas_vistas_at && !round.seleccionada_at && !!selection.length && !overflow && data!.validationMode === 'DESARROLLO';
+    if (action === 'ver-ofertas') return !!round?.publicada_at && !round.ofertas_vistas_at && data!.seleccionHabilitada;
+    if (action === 'adjudicar') return !!round?.ofertas_vistas_at && !round.seleccionada_at && !!selection.length && !overflow && !supera && data!.seleccionHabilitada;
     if (action === 'leer' || action === 'finalizar-actividad') {
       if (!myParticipation || (action === 'leer' ? myParticipation.lectura_at : myParticipation.finalizada_at || !myParticipation.lectura_at)) return false;
       if (action === 'finalizar-actividad' && data!.enabled)
@@ -89,7 +98,9 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
     </section>
     <section className="card" aria-label="Acciones del operativo">
       <h2>Acciones del operativo</h2>
-      <p className="notice warning">{data.validationMode === 'DESARROLLO' ? 'Validación de desarrollo: ofertas activas consideradas disponibles. Sistema Nacional real pendiente.' : 'Validación externa pendiente. La selección requiere habilitar explícitamente el modo de desarrollo.'}</p>
+      <p className="notice warning">{data.validacionSn ? 'Ofertas validadas por el Sistema Nacional. Al adjudicar se comprometen sus recursos y se liberan al cerrar el operativo.'
+        : data.validationMode === 'DESARROLLO' ? 'Validación de desarrollo: ofertas activas consideradas disponibles. Sistema Nacional real pendiente.'
+        : 'Validación del Sistema Nacional pendiente. La selección se habilita cuando la convocatoria venza y el SN valide las ofertas.'}</p>
       <ErrorMessage error={error} />
       {feedback && <p role="status">{feedback}</p>}
       {warnings.map((w, i) => <p className="notice warning" role="alert" key={i}>{w.message}</p>)}
@@ -97,8 +108,15 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
         <h3>Evaluar curso alternativo</h3>
         <p>La convocatoria terminó sin cubrir todos los lotes. El coordinador debe elegir cómo continuar.</p>
         <ul>{lots.map(l => {
-          const offered = l.ofertas.filter(o => o.activa).reduce((sum, o) => sum + o.cantidad_ofrecida, 0);
-          return <li key={l.id}>{l.descripcion}: {offered} / {l.cantidad_requerida} {l.unidad} ofrecidas · Faltan {Math.max(0, l.cantidad_requerida - offered)}</li>;
+          const activas = l.ofertas.filter(o => o.activa);
+          const offered = activas.reduce((sum, o) => sum + o.cantidad_ofrecida, 0);
+          const validada = activas.reduce((sum, o) => sum + cubierta(o), 0);
+          const conSn = activas.some(o => o.validacion_actual);
+          return <li key={l.id}>{l.descripcion}: {offered} / {l.cantidad_requerida} {l.unidad} ofrecidas
+            {conSn ? ` · ${validada} validadas por el SN · Faltan ${Math.max(0, l.cantidad_requerida - validada)}` : ` · Faltan ${Math.max(0, l.cantidad_requerida - offered)}`}
+            {conSn && <ul>{activas.map(o => <li key={o.id}>{o.ong_usuario.organizacion}: {o.validacion_actual?.resultado ?? 'sin validar'}
+              {o.validacion_actual ? ` — ${o.validacion_actual.motivo}` : ''}</li>)}</ul>}
+          </li>;
         })}</ul>
       </div>}
       {available('adjudicar') && round?.publicada_at && <div className="selection-list">
@@ -106,12 +124,14 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
         {lots.map(l => <div key={l.id}><h4>{l.descripcion}</h4>
           <p>Seleccionadas: {l.ofertas.filter(o => selection.includes(o.id)).reduce((n, o) => n + o.cantidad_ofrecida, 0)} / {l.cantidad_requerida} {l.unidad}</p>
           {l.ofertas.filter(o => o.activa).map(o => <label className="offer-choice" key={o.id}>
-            <input type="checkbox" checked={selection.includes(o.id)} disabled={pending || !!confirm || !available('adjudicar') || !!round.seleccionada_at || data.validationMode !== 'DESARROLLO'}
+            <input type="checkbox" checked={selection.includes(o.id)} disabled={pending || !!confirm || !available('adjudicar') || !!round.seleccionada_at || !data.seleccionHabilitada || sinCapacidad(o)}
               onChange={e => setSelection(v => e.target.checked ? [...v, o.id] : v.filter(x => x !== o.id))} />
             {o.ong_usuario.organizacion}: {o.cantidad_ofrecida} {l.unidad}{o.adjudicacion ? ' · Adjudicada' : ''}
+            {o.validacion_actual && ` · SN: ${o.validacion_actual.resultado} (válida ${o.validacion_actual.cantidad_valida})${sinCapacidad(o) ? ` — ${o.validacion_actual.motivo}` : ''}`}
           </label>)}
         </div>)}
         {overflow && <p role="alert">La selección supera la cantidad requerida de un lote. Seleccione otra combinación.</p>}
+        {supera && !overflow && <p role="alert">La selección supera la cantidad validada por el Sistema Nacional para un lote.</p>}
       </div>}
       {user?.rol === 'ONG' && round?.seleccionada_at && <div>
         <h3>Resultado de adjudicación</h3>

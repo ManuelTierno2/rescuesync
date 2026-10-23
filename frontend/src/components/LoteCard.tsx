@@ -1,9 +1,67 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { api, type Consorcio, type InventarioItem, type Lote, type Oferta, type OfertaValidacion } from '../api';
+import { api, type CodigoSn, type Consorcio, type InventarioItem, type Lote, type Oferta, type OfertaValidacion } from '../api';
 import { useApiData, useSubmission } from '../hooks';
 import { useDevUser } from '../auth-context';
 import { ErrorMessage, Field, Loading, Success, formatNumber } from '../ui';
+
+/**
+ * Selección de ítem de inventario para una oferta: solo ítems del mismo tipo que el lote.
+ * Si el ítem elegido no tiene código del Sistema Nacional se pide aquí y se guarda en el inventario antes de ofertar.
+ */
+function useInventarioLote(lote: Lote) {
+  const inventarios = useApiData<InventarioItem[]>('/inventario');
+  const codigos = useApiData<CodigoSn[]>('/inventario/codigos-sn');
+  const [itemId, setItemId] = useState('');
+  const [codigo, setCodigo] = useState('');
+  const items = (inventarios.data ?? []).filter((item) => item.tipo === lote.tipo);
+  const seleccionado = items.find((item) => item.id === itemId);
+  const necesitaCodigo = Boolean(seleccionado && !seleccionado.codigo_sn);
+  async function vincular() {
+    if (seleccionado && necesitaCodigo) {
+      await api<InventarioItem>('/inventario/' + seleccionado.id, { method: 'PATCH', body: { codigoSn: codigo } });
+      inventarios.refresh();
+    }
+  }
+  return {
+    lote, items, codigos: codigos.data ?? [], codigosError: codigos.error, refreshCodigos: codigos.refresh, loading: inventarios.loading, error: inventarios.error, refresh: inventarios.refresh,
+    itemId, setItemId: (id: string) => { setItemId(id); setCodigo(''); },
+    codigo, setCodigo, necesitaCodigo, vincular, reset: () => { setItemId(''); setCodigo(''); },
+  };
+}
+type InventarioLote = ReturnType<typeof useInventarioLote>;
+
+function InventarioPicker({ ctl, error }: { ctl: InventarioLote; error: unknown }) {
+  return (
+    <>
+      <ErrorMessage error={ctl.error} retry={ctl.refresh} />
+      {ctl.necesitaCodigo && <ErrorMessage error={ctl.codigosError} retry={ctl.refreshCodigos} />}
+      {!ctl.loading && ctl.items.length === 0 && (
+        <p className="notice">
+          No tenés ítems de tipo {ctl.lote.tipo} en tu inventario. <Link to="/inventario">Cargá uno con su código SN</Link> para ofertar.
+        </p>
+      )}
+      <Field label="Ítem de inventario" error={error} field="inventario_item_id">
+        <select required value={ctl.itemId} onChange={(e) => ctl.setItemId(e.target.value)}>
+          <option value="" disabled>Seleccionar ítem…</option>
+          {ctl.items.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.descripcion} ({formatNumber(item.cantidad)} {item.unidad}) · {item.codigo_sn ?? 'sin código SN'}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {ctl.necesitaCodigo && (
+        <Field label="Código Sistema Nacional (se guarda en el ítem)" error={error} field="codigoSn">
+          <select required value={ctl.codigo} onChange={(e) => ctl.setCodigo(e.target.value)}>
+            <option value="" disabled>Seleccionar código…</option>
+            {ctl.codigos.map((c) => <option key={c.codigo} value={c.codigo}>{c.codigo} ({c.unidad})</option>)}
+          </select>
+        </Field>
+      )}
+    </>
+  );
+}
 
 function OfertaForm({
   lote,
@@ -14,30 +72,31 @@ function OfertaForm({
   userId: string;
   onSaved: () => void;
 }) {
-  const inventarios = useApiData<InventarioItem[]>('/inventario');
+  const inventario = useInventarioLote(lote);
   const consorcios = useApiData<Consorcio[]>('/consorcios');
   const [cantidad, setCantidad] = useState('');
   const [observaciones, setObservaciones] = useState('');
-  const [inventarioId, setInventarioId] = useState('');
   const [consorcioId, setConsorcioId] = useState('');
   const state = useSubmission();
   function save(event: FormEvent) {
     event.preventDefault();
     void state.submit(
-      () =>
-        api<Oferta>('/lotes/' + lote.id + '/ofertas', {
+      async () => {
+        await inventario.vincular();
+        return api<Oferta>('/lotes/' + lote.id + '/ofertas', {
           body: {
             ong_usuario_id: userId,
             cantidad_ofrecida: Number(cantidad),
             observaciones,
-            inventario_item_id: inventarioId || null,
+            inventario_item_id: inventario.itemId,
             consorcio_id: consorcioId || null,
           },
-        }),
+        });
+      },
       () => {
         setCantidad('');
         setObservaciones('');
-        setInventarioId('');
+        inventario.reset();
         setConsorcioId('');
         onSaved();
       },
@@ -48,8 +107,8 @@ function OfertaForm({
     <form className="offer-form" onSubmit={save}>
       <h4>Ofrecer ayuda</h4>
       <p className="muted">
-        Puede ofrecer una parte de la cantidad requerida. Opcional:{' '}
-        <Link to="/inventario">vincular inventario</Link>.
+        Puede ofrecer una parte de la cantidad requerida. La oferta se respalda en un ítem de su{' '}
+        <Link to="/inventario">inventario</Link> con código del Sistema Nacional.
       </p>
       <ErrorMessage error={state.error} />
       <Success message={state.success} />
@@ -74,16 +133,7 @@ function OfertaForm({
             placeholder="Disponibilidad, entrega u otros detalles."
           />
         </Field>
-        <Field label="Inventario (opcional)" error={state.error} field="inventario_item_id">
-          <select value={inventarioId} onChange={(e) => setInventarioId(e.target.value)}>
-            <option value="">Sin vincular</option>
-            {inventarios.data?.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.descripcion} ({formatNumber(item.cantidad)} {item.unidad})
-              </option>
-            ))}
-          </select>
-        </Field>
+        <InventarioPicker ctl={inventario} error={state.error} />
         <Field label="Consorcio (opcional)" error={state.error} field="consorcio_id">
           <select value={consorcioId} onChange={(e) => setConsorcioId(e.target.value)}>
             <option value="">Individual</option>
@@ -94,7 +144,9 @@ function OfertaForm({
             ))}
           </select>
         </Field>
-        <button type="submit">{state.pending ? 'Enviando oferta…' : 'Enviar oferta'}</button>
+        <button type="submit" disabled={inventario.items.length === 0}>
+          {state.pending ? 'Enviando oferta…' : 'Enviar oferta'}
+        </button>
       </fieldset>
     </form>
   );
@@ -103,15 +155,23 @@ function OfertaForm({
 function EditOfertaForm({ oferta, lote, onSaved }: { oferta: Oferta; lote: Lote; onSaved: () => void }) {
   const [cantidad, setCantidad] = useState(String(oferta.cantidad_ofrecida));
   const [observaciones, setObservaciones] = useState(oferta.observaciones || '');
+  const inventario = useInventarioLote(lote);
+  const sinItem = !oferta.inventario_item_id; // oferta legada: hay que vincular un ítem para poder guardarla
   const state = useSubmission();
   function save(event: FormEvent) {
     event.preventDefault();
     void state.submit(
-      () =>
-        api<Oferta>('/ofertas/' + oferta.id, {
+      async () => {
+        if (sinItem) await inventario.vincular();
+        return api<Oferta>('/ofertas/' + oferta.id, {
           method: 'PATCH',
-          body: { cantidad_ofrecida: Number(cantidad), observaciones },
-        }),
+          body: {
+            cantidad_ofrecida: Number(cantidad),
+            observaciones,
+            ...(sinItem ? { inventario_item_id: inventario.itemId } : {}),
+          },
+        });
+      },
       onSaved,
       'Oferta actualizada.',
     );
@@ -128,6 +188,12 @@ function EditOfertaForm({ oferta, lote, onSaved }: { oferta: Oferta; lote: Lote;
         <Field label="Observaciones" error={state.error} field="observaciones">
           <textarea rows={2} maxLength={5000} value={observaciones} onChange={(e) => setObservaciones(e.target.value)} />
         </Field>
+        {sinItem && (
+          <>
+            <p className="notice">Esta oferta no tiene ítem de inventario: vinculá uno para poder guardarla.</p>
+            <InventarioPicker ctl={inventario} error={state.error} />
+          </>
+        )}
         <button type="submit">{state.pending ? 'Guardando…' : 'Guardar cambios'}</button>
       </fieldset>
     </form>

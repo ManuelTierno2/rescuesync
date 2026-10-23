@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { api, CODIGOS_SN, type CodigoRecursoSn, type InventarioItem } from '../api';
+import { api, type CodigoSn, type InventarioItem } from '../api';
 import { useAuth } from '../auth-context';
 import { useApiData, useSubmission } from '../hooks';
 import { ErrorMessage, Field, Loading, Success, formatNumber } from '../ui';
@@ -7,11 +7,12 @@ import { ErrorMessage, Field, Loading, Success, formatNumber } from '../ui';
 export function InventarioPage() {
   const { user } = useAuth();
   const query = useApiData<InventarioItem[]>('/inventario');
+  const codigos = useApiData<CodigoSn[]>('/inventario/codigos-sn');
   const [tipo, setTipo] = useState<'PERSONAL' | 'RECURSO'>('RECURSO');
   const [descripcion, setDescripcion] = useState('');
   const [cantidad, setCantidad] = useState('');
   const [unidad, setUnidad] = useState('');
-  const [codigoSn, setCodigoSn] = useState<CodigoRecursoSn | ''>('');
+  const [codigoSn, setCodigoSn] = useState('');
   const state = useSubmission();
   if (user?.rol !== 'ONG') {
     return <p className="notice">Solo usuarios ONG pueden gestionar inventario.</p>;
@@ -20,7 +21,7 @@ export function InventarioPage() {
     event.preventDefault();
     void state.submit(
       () => api<InventarioItem>('/inventario', {
-        body: { tipo, descripcion, cantidad: Number(cantidad), unidad, codigoSn: codigoSn || null },
+        body: { tipo, descripcion, cantidad: Number(cantidad), unidad, codigoSn },
       }),
       () => {
         setDescripcion('');
@@ -38,7 +39,7 @@ export function InventarioPage() {
         <div>
           <p className="eyebrow">ONG</p>
           <h1>Inventario</h1>
-          <p className="muted">Stock disponible para ofertar en convocatorias. El código del Sistema Nacional permite validar tus ofertas.</p>
+          <p className="muted">Stock disponible para ofertar en convocatorias. El código del Sistema Nacional es obligatorio: toda oferta se respalda en un ítem con código.</p>
         </div>
       </div>
       <ErrorMessage error={query.error} retry={query.refresh} />
@@ -75,13 +76,14 @@ export function InventarioPage() {
             <input required value={unidad} onChange={(e) => setUnidad(e.target.value)} />
           </Field>
           <Field label="Código Sistema Nacional" error={state.error} field="codigoSn">
-            <select value={codigoSn} onChange={(e) => setCodigoSn(e.target.value as CodigoRecursoSn | '')}>
-              <option value="">Sin mapeo</option>
-              {CODIGOS_SN.map((c) => (
-                <option key={c} value={c}>{c}</option>
+            <select required value={codigoSn} onChange={(e) => setCodigoSn(e.target.value)}>
+              <option value="" disabled>Seleccionar código…</option>
+              {codigos.data?.map((c) => (
+                <option key={c.codigo} value={c.codigo}>{c.codigo} ({c.unidad})</option>
               ))}
             </select>
           </Field>
+          <ErrorMessage error={codigos.error} retry={codigos.refresh} />
           <button type="submit">{state.pending ? 'Guardando…' : 'Agregar'}</button>
         </fieldset>
       </form>

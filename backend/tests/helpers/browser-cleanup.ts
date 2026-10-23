@@ -12,6 +12,7 @@ try {
   const ids = records.map((record) => record.id);
   await prisma.$transaction([
     prisma.oferta.deleteMany({ where: { lote: { emergencia_id: { in: ids } } } }),
+    prisma.inventarioItem.deleteMany({ where: { descripcion: { startsWith: prefix } } }),
     prisma.lote.deleteMany({ where: { emergencia_id: { in: ids } } }),
     prisma.emergencia.deleteMany({ where: { id: { in: ids } } }),
   ]);

@@ -8,8 +8,28 @@ import { createWorkflowService, integrationWarning } from './workflow.service.js
 export interface IntegrationWarning { code: string; message: string }
 export interface CrearEmergenciaResult { emergencia: Emergencia; warnings?: IntegrationWarning[] }
 
+/**
+ * Justo después de instanciar el caso, la tarea "Registrar emergencia" puede no estar visible todavía en Bonita.
+ * Se reintenta solo ante BONITA_TASK_NOT_FOUND: en ese punto no se guardó nada, por lo que repetir es seguro.
+ */
+export interface RegisterRetry { attempts: number; delayMs: number }
+const DEFAULT_REGISTER_RETRY: RegisterRetry = { attempts: 12, delayMs: 500 };
+
+async function registerWithRetry(prisma: PrismaClient, bonita: BonitaService, emergenciaId: string, actorId: string, retry: RegisterRetry) {
+  const workflow = createWorkflowService(prisma, bonita);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await workflow.register(emergenciaId, actorId);
+    } catch (error) {
+      const notReady = (error instanceof AppError || error instanceof BonitaError) && error.code === 'BONITA_TASK_NOT_FOUND';
+      if (!notReady || attempt >= retry.attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retry.delayMs));
+    }
+  }
+}
+
 export async function crearEmergencia(prisma: PrismaClient, input: CrearEmergenciaInput,
-  bonita: BonitaService = createBonitaService()): Promise<CrearEmergenciaResult> {
+  bonita: BonitaService = createBonitaService(), registerRetry: RegisterRetry = DEFAULT_REGISTER_RETRY): Promise<CrearEmergenciaResult> {
   const usuario = await prisma.usuario.findUnique({
     where: { id: input.creada_por_id },
     select: { rol: true },
@@ -54,7 +74,7 @@ export async function crearEmergencia(prisma: PrismaClient, input: CrearEmergenc
       message: `La emergencia ${emergencia.id} se guardó y Bonita inició la instancia ${instanceId}, pero no se pudo confirmar que el vínculo quedara guardado. No repita el alta.` }] };
   }
   try {
-    const result = await createWorkflowService(prisma, bonita).register(updated.id, updated.creada_por_id);
+    const result = await registerWithRetry(prisma, bonita, updated.id, updated.creada_por_id, registerRetry);
     return { emergencia: updated, ...('warnings' in result ? { warnings: result.warnings } : {}) };
   } catch (error) {
     const warning = integrationWarning(error);

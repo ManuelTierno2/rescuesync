@@ -21,12 +21,13 @@ for (const [label, decisionCurso] of [
       submitted = route.request().postDataJSON(); data = { estado: 'CONFIRMADO' };
     } else if (path.endsWith('/workflow')) data = {
       enabled: true, compatible: true, state: 'OPEN', caseId: '1', localClosed: false, validationMode: 'DESARROLLO',
-      round, readyTasks: [{ id: submitted ? '11' : '10', name: submitted ? 'Monitorear despliegue' : 'Evaluar curso alternativo' }],
+      validacionSn: false, seleccionHabilitada: true, round, readyTasks: [{ id: submitted ? '11' : '10', name: submitted ? 'Monitorear despliegue' : 'Evaluar curso alternativo' }],
       availableActions: submitted ? [] : ['decidir'], windows: [], actions: [],
     };
     else if (path.endsWith('/monitoreo')) data = { emergencia: emergency, rondas: [{ ...round, participaciones: [],
       lotes: [{ id: 'lot', descripcion: 'Bomberos', cantidad_requerida: 10, unidad: 'personas', ofertas: [offer] }] }] };
     else if (path.endsWith('/lotes')) data = [];
+    else if (path.endsWith('/validaciones')) data = [];
     else if (path.endsWith('/' + id)) data = emergency;
     else throw new Error('Unexpected request: ' + path);
     await route.fulfill({ json: { data } });

@@ -21,6 +21,7 @@ const prisma = createPrismaClient(dbUrl);
 const app = createApp(prisma);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const owned: string[] = [];
+const ownedItems: string[] = [];
 
 before(async () => {
   await promisify(execFile)(process.execPath, ['node_modules/prisma/build/index.js', 'migrate', 'deploy'], {
@@ -34,6 +35,7 @@ before(async () => {
 after(async () => {
   try {
     await prisma.oferta.deleteMany({ where: { lote: { emergencia_id: { in: owned } } } });
+    await prisma.inventarioItem.deleteMany({ where: { id: { in: ownedItems } } });
     await prisma.lote.deleteMany({ where: { emergencia_id: { in: owned } } });
     await prisma.emergencia.deleteMany({ where: { id: { in: owned } } });
   } finally {
@@ -73,10 +75,16 @@ describe('Ofertas versionado', () => {
       },
     });
 
+    const item = await prisma.inventarioItem.create({
+      data: { ong_usuario_id: ONG_A_DEMO_ID, tipo: 'RECURSO', descripcion: 'Agua', cantidad: 500, unidad: 'litros', codigo_sn: 'AGUA_POTABLE' },
+    });
+    ownedItems.push(item.id);
+
     const oferta = await request(app).post(`/api/lotes/${lote.body.data.id}/ofertas`)
       .set('X-Dev-User-Id', ONG_A_DEMO_ID)
       .send({
         ong_usuario_id: ONG_A_DEMO_ID,
+        inventario_item_id: item.id,
         cantidad_ofrecida: 40,
         observaciones: 'Primera versión',
       }).expect(201);

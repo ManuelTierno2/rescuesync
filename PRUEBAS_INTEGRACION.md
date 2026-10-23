@@ -149,7 +149,7 @@ Con ese token: `POST /validaciones` (perfiles por oferta), `POST /compromisos`
 
 1. Entrar como `municipio@rescuesync.test` (password `demo1234`) y crear emergencia.
 2. Como `coordinador@rescuesync.test`, crear lotes y publicar convocatoria.
-3. Como `ong.a@rescuesync.test` y/o `ong.b@rescuesync.test`, cargar ofertas.
+3. Como `ong.a@rescuesync.test` y/o `ong.b@rescuesync.test`, cargar en **/inventario** ítems con código SN (obligatorio, elegido del catálogo del SN: `GET /api/inventario/codigos-sn`) y luego ofertar eligiendo un ítem del mismo tipo que el lote. Ofertar sin ítem, con ítem sin código o de otro tipo devuelve 422; el stock acumulado entre ofertas lo arbitra el SN, no el back.
 4. Como municipio, continuar a selección, elegir ofertas y confirmar adjudicación.
 5. Las ONG adjudicadas confirman lectura y finalización; el coordinador finaliza
    monitoreo y cierra cuando todas las actividades estén completas.
@@ -194,7 +194,7 @@ npm.cmd test
 cd ../frontend
 npm.cmd run build
 npx.cmd playwright install chromium
-npm.cmd run test:e2e
+npm.cmd run test:e2e   # E2E_API_PORT=3101 si el puerto 3001 está ocupado por el Sistema Nacional local
 cd ../sistema_nacional
 npm.cmd run build
 npm.cmd run typecheck

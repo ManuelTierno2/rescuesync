@@ -17,14 +17,23 @@ const dbUrl = testDatabaseUrl();
 const prisma = createPrismaClient(dbUrl);
 const secret = 'workflow-test-connector-secret-000000000';
 const owned: string[] = [];
+const stockItems = new Map<string, string>();
 before(async () => {
   await promisify(execFile)(process.execPath, ['node_modules/prisma/build/index.js', 'migrate', 'deploy'], {
     env: { ...process.env, DATABASE_URL: dbUrl }, windowsHide: true,
   });
   await seedUsuarios(prisma);
+  // Toda oferta exige un ítem de inventario con código SN: un ítem con stock amplio por ONG.
+  for (const ong of [A, B]) {
+    const item = await prisma.inventarioItem.create({
+      data: { ong_usuario_id: ong, tipo: 'RECURSO', descripcion: 'Stock workflow ' + randomUUID(), cantidad: 2147483647, unidad: 'raciones', codigo_sn: 'RACION_ALIMENTO' },
+    });
+    stockItems.set(ong, item.id);
+  }
 });
 after(async () => {
   await prisma.oferta.deleteMany({ where: { lote: { emergencia_id: { in: owned } } } });
+  await prisma.inventarioItem.deleteMany({ where: { id: { in: [...stockItems.values()] } } });
   await prisma.lote.deleteMany({ where: { emergencia_id: { in: owned } } });
   await prisma.emergencia.deleteMany({ where: { id: { in: owned } } });
   await prisma.$disconnect();
@@ -43,7 +52,7 @@ async function fixture(enabled = true, options: StubOptions = {}, compatible = t
   const lote = async (cantidad = 10) => (await request(app).post(`/api/emergencias/${id}/lotes`).set('X-Dev-User-Id', C)
     .send({ tipo: 'RECURSO', descripcion: 'Raciones ' + randomUUID(), cantidad_requerida: cantidad, unidad: 'raciones' }).expect(201)).body.data;
   const oferta = (loteId: string, actor: string, cantidad: number) => request(app).post(`/api/lotes/${loteId}/ofertas`).set('X-Dev-User-Id', actor)
-    .send({ ong_usuario_id: actor, cantidad_ofrecida: cantidad });
+    .send({ ong_usuario_id: actor, cantidad_ofrecida: cantidad, inventario_item_id: stockItems.get(actor) });
   const callback = (kind: string, activityId: string, body: object = {}) => request(app).post(`/api/internal/bonita/emergencias/${id}/convocatoria/${kind}`)
     .set('Authorization', 'Bearer ' + secret).send({ caseId, actividadId: activityId, ...body });
   const open = async () => {

@@ -44,17 +44,6 @@ enum TipoLote {
   @@map("tipo_lote")
 }
 
-/// Códigos de recurso del Sistema Nacional (deben coincidir con su catálogo).
-enum CodigoRecursoSn {
-  PARAMEDICO
-  RACION_ALIMENTO
-  AGUA_POTABLE
-  KIT_MEDICO
-  VEHICULO_RESCATE
-
-  @@map("codigo_recurso_sn")
-}
-
 model Organizacion {
   id         String           @id @default(uuid()) @db.Uuid
   nombre     String           @db.VarChar(150)
@@ -136,8 +125,9 @@ model InventarioItem {
   /// La migración SQL impone cantidad > 0.
   cantidad       Int
   unidad         String           @db.VarChar(50)
-  /// Código en el catálogo del Sistema Nacional; sin mapeo la oferta valida SIN_CAPACIDAD.
-  codigo_sn      CodigoRecursoSn?
+  /// Código de recurso del Sistema Nacional. El catálogo lo define el SN: texto validado contra su API;
+  /// sin código la oferta valida SIN_CAPACIDAD.
+  codigo_sn      String?  @db.VarChar(50)
   created_at     DateTime @default(now()) @db.Timestamptz(3)
   updated_at     DateTime @default(now()) @updatedAt @db.Timestamptz(3)
   ong_usuario    Usuario  @relation(fields: [ong_usuario_id], references: [id], onDelete: Restrict)

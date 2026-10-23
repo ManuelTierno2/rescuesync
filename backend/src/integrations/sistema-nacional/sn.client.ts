@@ -27,6 +27,7 @@ export interface SnResultadoValidacion {
 }
 
 export interface SnCertificacion { codigo: string; tipoRecurso: string; nivelRiesgoMax: string }
+export interface SnTipoRecurso { codigo: string; unidad: string }
 
 export interface SnCompromisoResult {
   status: number;
@@ -79,6 +80,17 @@ export function createSnClient(config: Extract<SnConfig, { enabled: true }>) {
       const res = await call('/certificaciones');
       if (res.status !== 200) throw new SnError('SN_CATALOG_FAILED', 'No se pudo obtener el catálogo del Sistema Nacional.', res.status);
       return await res.json() as SnCertificacion[];
+    },
+    /** Catálogo de tipos de recurso (códigos) que el SN acepta; lo define el SN, no este back. */
+    async getTiposRecurso(): Promise<SnTipoRecurso[]> {
+      const res = await call('/tipos-recurso');
+      if (res.status !== 200) {
+        await res.body?.cancel();
+        throw new SnError('SN_CATALOG_FAILED', 'No se pudo obtener el catálogo de recursos del Sistema Nacional.', res.status);
+      }
+      const body = await json(res) as unknown;
+      const list = Array.isArray(body) ? body : [];
+      return list.filter((t): t is SnTipoRecurso => typeof t?.codigo === 'string' && typeof t?.unidad === 'string');
     },
     /** Alta/actualización idempotente de una ONG por externalId. */
     async syncOng(body: Record<string, unknown>): Promise<void> {

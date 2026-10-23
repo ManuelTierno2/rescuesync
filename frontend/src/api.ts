@@ -44,8 +44,8 @@ export interface Oferta {
   created_at: string;
   updated_at: string;
 }
-export type CodigoRecursoSn = 'PARAMEDICO' | 'RACION_ALIMENTO' | 'AGUA_POTABLE' | 'KIT_MEDICO' | 'VEHICULO_RESCATE';
-export const CODIGOS_SN: CodigoRecursoSn[] = ['PARAMEDICO', 'RACION_ALIMENTO', 'AGUA_POTABLE', 'KIT_MEDICO', 'VEHICULO_RESCATE'];
+/** Código de recurso del Sistema Nacional; el catálogo lo publica el SN vía el back (`GET /inventario/codigos-sn`). */
+export interface CodigoSn { codigo: string; unidad: string }
 export interface InventarioItem {
   id: string;
   ong_usuario_id: string;
@@ -53,7 +53,7 @@ export interface InventarioItem {
   descripcion: string;
   cantidad: number;
   unidad: string;
-  codigo_sn: CodigoRecursoSn | null;
+  codigo_sn: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -21,8 +21,11 @@ const testUrl = { data: testDatabaseUrl() };
 const prisma = createPrismaClient(testUrl.data);
 const app = createApp(prisma);
 const root = fileURLToPath(new URL('../', import.meta.url));
-const owned = { emergencias: [] as string[], lotes: [] as string[], ofertas: [] as string[], usuarios: [] as string[] };
+const owned = { emergencias: [] as string[], lotes: [] as string[], ofertas: [] as string[], usuarios: [] as string[], items: [] as string[] };
 const otrosRoles = new Map<string, string>();
+/** Ítems de inventario con código SN por ONG y tipo: toda oferta debe vincular uno. */
+const stock = new Map<string, string>();
+const stockId = (ong: string, tipo: 'RECURSO' | 'PERSONAL' = 'RECURSO') => stock.get(`${ong}:${tipo}`)!;
 const validBody = {
   creada_por_id: MUNICIPIO_DEMO_ID,
   gravedad: 'ALTA',
@@ -64,12 +67,22 @@ before(async () => {
     owned.usuarios.push(id);
     otrosRoles.set(rol, id);
   }
+  for (const ong of [otrosRoles.get('ONG')!, ONG_B_DEMO_ID]) {
+    for (const [tipo, codigo_sn] of [['RECURSO', 'RACION_ALIMENTO'], ['PERSONAL', 'PARAMEDICO']] as const) {
+      const item = await prisma.inventarioItem.create({
+        data: { ong_usuario_id: ong, tipo, descripcion: `Stock ${tipo}`, cantidad: 2147483647, unidad: 'u', codigo_sn },
+      });
+      owned.items.push(item.id);
+      stock.set(`${ong}:${tipo}`, item.id);
+    }
+  }
 });
 
 after(async () => {
   try {
     // Borrar únicamente los registros creados por esta ejecución.
     await prisma.oferta.deleteMany({ where: { id: { in: owned.ofertas } } });
+    await prisma.inventarioItem.deleteMany({ where: { id: { in: owned.items } } });
     await prisma.lote.deleteMany({ where: { id: { in: owned.lotes } } });
     await prisma.emergencia.deleteMany({ where: { id: { in: owned.emergencias } } });
     await prisma.usuario.deleteMany({ where: { id: { in: owned.usuarios } } });
@@ -279,6 +292,7 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     ] as const) {
       const response = await request(app).post('/api/lotes/' + loteId + '/ofertas').set('X-Dev-User-Id', ong).send({
         ong_usuario_id: ong, cantidad_ofrecida: cantidad, observaciones: '  Entrega inmediata  ',
+        inventario_item_id: stockId(ong, loteId === personal.id ? 'PERSONAL' : 'RECURSO'),
       }).expect(201);
       owned.ofertas.push(response.body.data.id);
       assert.equal(response.body.data.observaciones, 'Entrega inmediata');
@@ -299,6 +313,7 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     for (const observaciones of [undefined, null, '  ', 'o'.repeat(5000)]) {
       const response = await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', otrosRoles.get('ONG')!).send({
         ong_usuario_id: otrosRoles.get('ONG'), cantidad_ofrecida: 2147483647, observaciones,
+        inventario_item_id: stockId(otrosRoles.get('ONG')!),
       }).expect(201);
       owned.ofertas.push(response.body.data.id);
       assert.equal(response.body.data.observaciones, typeof observaciones === 'string' && observaciones.trim() ? observaciones : null);
@@ -308,7 +323,7 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     const created = await createEmergency();
     const item = await lote(created.body.data.id);
     const loteBody = { tipo: 'RECURSO', descripcion: 'Alimentos', cantidad_requerida: 1000, unidad: 'raciones' };
-    const ofertaBody = { ong_usuario_id: otrosRoles.get('ONG'), cantidad_ofrecida: 400 };
+    const ofertaBody = { ong_usuario_id: otrosRoles.get('ONG'), cantidad_ofrecida: 400, inventario_item_id: stockId(otrosRoles.get('ONG')!) };
     const lotesCount = await prisma.lote.count();
     const ofertasCount = await prisma.oferta.count();
     for (const cantidad of [0, -1, 1.5, 2147483648, '2', null]) {
@@ -322,6 +337,7 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     for (const change of [
       { ong_usuario_id: 'invalid' }, { observaciones: 42 }, { observaciones: 'o'.repeat(5001) },
       { lote_id: randomUUID() }, { id: randomUUID() }, { updated_at: 'now' },
+      { inventario_item_id: null }, { inventario_item_id: 'invalid' }, { inventario_item_id: undefined },
     ]) assertError(await request(app).post('/api/lotes/' + item.id + '/ofertas').set('X-Dev-User-Id', otrosRoles.get('ONG')!).send({ ...ofertaBody, ...change }), 400, 'VALIDATION_ERROR');
     assert.equal(await prisma.lote.count(), lotesCount);
     assert.equal(await prisma.oferta.count(), ofertasCount);
@@ -331,7 +347,7 @@ describe('Etapa 2: usuarios, lotes y ofertas por HTTP', () => {
     const item = await lote(created.body.data.id);
     const unknown = randomUUID();
     const loteBody = { tipo: 'RECURSO', descripcion: 'Alimentos', cantidad_requerida: 1, unidad: 'raciones' };
-    const ofertaBody = { ong_usuario_id: otrosRoles.get('ONG'), cantidad_ofrecida: 1 };
+    const ofertaBody = { ong_usuario_id: otrosRoles.get('ONG'), cantidad_ofrecida: 1, inventario_item_id: stockId(otrosRoles.get('ONG')!) };
     assertError(await request(app).get('/api/emergencias/' + unknown + '/lotes'), 404, 'EMERGENCIA_NOT_FOUND');
     assertError(await request(app).post('/api/emergencias/' + unknown + '/lotes').set('X-Dev-User-Id', COORDINADOR_DEMO_ID).send(loteBody), 404, 'EMERGENCIA_NOT_FOUND');
     assertError(await request(app).get('/api/lotes/' + unknown + '/ofertas'), 404, 'LOTE_NOT_FOUND');
@@ -383,6 +399,19 @@ describe('Alta de emergencia e integración Bonita con PostgreSQL', () => {
       } finally { await stub.close(); }
     });
   }
+  it('reintenta el registro cuando Bonita todavía no expone la tarea inicial', async () => {
+    const caseId = String(BigInt(Date.now()) * 1000n + 7n); // único por ejecución (bonita_instance_id es único)
+    const stub = await bonitaServer({ startBody: JSON.stringify({ caseId }), delayRegisterTaskMs: 1200 });
+    try {
+      const response = await request(createApp(prisma, createBonitaService(stub.config))).post('/api/emergencias')
+        .set(asMunicipio()).send({ ...validBody, zona: 'Registro tardío ' + randomUUID() }).expect(201);
+      owned.emergencias.push(response.body.data.id);
+      assert.equal(response.body.warnings, undefined);
+      const accion = await prisma.accionWorkflow.findFirstOrThrow({ where: { emergencia_id: response.body.data.id, accion: 'registrar' } });
+      assert.equal(accion.estado, 'CONFIRMADO');
+      assert.ok(stub.tasks.some((t) => t.caseId === caseId && t.name === 'Generar y publicar lotes' && t.state === 'ready'));
+    } finally { await stub.close(); }
+  });
   it('rechaza un alta inválida antes de contactar Bonita', async () => {
     const stub = await bonitaServer();
     try {
