@@ -47,6 +47,66 @@ function id(value: unknown): string {
 }
 export interface HumanTask { id: string; name: string; caseId: string; state: string; assigned_id: string }
 export interface CaseState { state: 'OPEN' | 'COMPLETED' | 'UNKNOWN'; processId?: string }
+/** Tarea humana terminada de un caso, con fechas ISO 8601. */
+export interface CaseTimelineTask { id: string; name: string; state: string; start: string; end: string }
+export interface CaseTimeline {
+  caseId: string;
+  state: 'OPEN' | 'COMPLETED' | 'UNKNOWN';
+  start: string | null;
+  end: string | null;
+  tasks: CaseTimelineTask[];
+}
+
+/** Bonita expone fechas "yyyy-MM-dd HH:mm:ss.SSS" en la zona horaria del servidor. */
+export function parseBonitaDate(value: unknown): Date | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const date = new Date(/^\d{4}-\d{2}-\d{2} \d/.test(value) ? value.replace(' ', 'T') : value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+const TERMINAL_STATES = new Set(['completed', 'aborted', 'skipped']);
+
+/**
+ * Arma la línea de tiempo de un caso a partir de los registros de archivedHumanTask.
+ * Bonita puede archivar varias versiones de una misma tarea (una por cambio de estado): se agrupan
+ * por sourceObjectId. El inicio es la primera fecha registrada; si Bonita solo archivó el estado
+ * final (inicio ≈ fin), se toma como inicio el fin de la tarea anterior del caso o el inicio del caso.
+ */
+export function buildCaseTimeline(
+  caseId: string,
+  info: { state: CaseTimeline['state']; start: Date | null; end: Date | null },
+  records: Record<string, unknown>[],
+): CaseTimeline {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const r of records) {
+    const key = String(r.sourceObjectId ?? r.id);
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  const raw: { id: string; name: string; state: string; start: Date | null; end: Date }[] = [];
+  for (const [taskId, versions] of groups) {
+    const terminal = versions.filter(v => TERMINAL_STATES.has(String(v.state)));
+    const ends = terminal.map(v => parseBonitaDate(v.archivedDate) ?? parseBonitaDate(v.reached_state_date))
+      .filter((d): d is Date => d !== null);
+    if (!ends.length) continue;
+    const end = new Date(Math.max(...ends.map(d => d.getTime())));
+    const starts = versions.flatMap(v => [parseBonitaDate(v.reached_state_date), parseBonitaDate(v.last_update_date)])
+      .filter((d): d is Date => d !== null);
+    const start = starts.length ? new Date(Math.min(...starts.map(d => d.getTime()))) : null;
+    const last = terminal.find(v => parseBonitaDate(v.archivedDate)?.getTime() === end.getTime()) ?? terminal.at(-1)!;
+    raw.push({ id: taskId, name: String(versions[0]!.name ?? ''), state: String(last.state), start, end });
+  }
+  raw.sort((a, b) => a.end.getTime() - b.end.getTime());
+  const tasks = raw.map((t, index) => {
+    let start = t.start;
+    if (!start || t.end.getTime() - start.getTime() < 1000) {
+      const previous = raw.slice(0, index).map(p => p.end).filter(d => d.getTime() <= t.end.getTime()).at(-1);
+      start = previous ?? info.start ?? start ?? t.end;
+    }
+    if (start.getTime() > t.end.getTime()) start = t.end;
+    return { id: t.id, name: t.name, state: t.state, start: start.toISOString(), end: t.end.toISOString() };
+  });
+  return { caseId, state: info.state, start: info.start?.toISOString() ?? null, end: info.end?.toISOString() ?? null, tasks };
+}
 type Send = (path: string, options?: RequestInit, accepted?: number[]) => Promise<Response>;
 
 export function createBonitaClient(config: Extract<BonitaConfig, { enabled: true }>) {
@@ -219,6 +279,45 @@ export function createBonitaClient(config: Extract<BonitaConfig, { enabled: true
       const archived = await search(send, 'archivedCase', [`sourceObjectId=${caseId}`]);
       return { state: archived.some(v => record(v) && v.sourceObjectId === caseId && v.state === 'completed') ? 'COMPLETED' : 'UNKNOWN' };
     }),
+    getCaseTimelines: async (caseIds: string[]): Promise<CaseTimeline[]> => {
+      caseIds.forEach(id);
+      const infos = new Map<string, { state: CaseTimeline['state']; start: Date | null; end: Date | null }>();
+      const records = new Map<string, Record<string, unknown>[]>(caseIds.map(c => [c, []]));
+      const seen = new Set<string>();
+      // Cada actor ve las tareas de su lane: se unen las búsquedas de los tres usuarios.
+      // Se agrupan de a 10 casos por sesión para no exceder BONITA_TIMEOUT_MS.
+      for (let i = 0; i < caseIds.length; i += 10) {
+        const chunk = caseIds.slice(i, i + 10);
+        for (const actor of BONITA_ACTORS) {
+          await session(actor, async send => {
+            for (const caseId of chunk) {
+              if (actor === 'municipio') {
+                const response = await send(`/API/bpm/case/${caseId}`, {}, [200, 404]);
+                if (response.status === 200) {
+                  const value = parseJson(await response.text());
+                  infos.set(caseId, { state: 'OPEN', start: record(value) ? parseBonitaDate(value.start) : null, end: null });
+                } else {
+                  await response.body?.cancel();
+                  const archived = (await search(send, 'archivedCase', [`sourceObjectId=${caseId}`]))
+                    .filter((v): v is Record<string, unknown> => record(v) && v.sourceObjectId === caseId);
+                  const done = archived.find(v => v.state === 'completed') ?? archived[0];
+                  infos.set(caseId, {
+                    state: done?.state === 'completed' ? 'COMPLETED' : 'UNKNOWN',
+                    start: parseBonitaDate(done?.start), end: parseBonitaDate(done?.end_date),
+                  });
+                }
+              }
+              for (const v of await search(send, 'archivedHumanTask', [`caseId=${caseId}`])) {
+                if (!record(v) || v.caseId !== caseId || seen.has(String(v.id))) continue;
+                seen.add(String(v.id)); records.get(caseId)!.push(v);
+              }
+            }
+          });
+        }
+      }
+      return caseIds.map(caseId =>
+        buildCaseTimeline(caseId, infos.get(caseId) ?? { state: 'UNKNOWN', start: null, end: null }, records.get(caseId)!));
+    },
     isTaskCompleted: (caseId: string, taskId: string) => session('municipio', async send => {
       const archived = await search(send, 'archivedHumanTask', [`caseId=${id(caseId)}`, `sourceObjectId=${id(taskId)}`]);
       return archived.some(v => record(v) && v.sourceObjectId === taskId && v.caseId === caseId && v.state === 'completed');

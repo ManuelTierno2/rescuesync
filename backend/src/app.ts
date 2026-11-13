@@ -14,6 +14,7 @@ import { createAuthRouter } from './routes/auth.routes.js';
 import { createOrganizacionesRouter } from './routes/organizaciones.routes.js';
 import { createInventarioRouter } from './routes/inventario.routes.js';
 import { createConsorciosRouter } from './routes/consorcios.routes.js';
+import { createIndicadoresRouter } from './routes/indicadores.routes.js';
 import { readAuthConfig, type AuthConfig } from './config/env.js';
 import { createCatalogoSn } from './services/catalogo-sn.service.js';
 
@@ -35,8 +36,9 @@ export function createApp(
   app.use('/api/auth', createAuthRouter(prisma, authConfig));
   app.use('/api/usuarios', createUsuariosRouter(prisma));
   app.use('/api/organizaciones', createOrganizacionesRouter(prisma, authConfig));
-  app.use('/api/inventario', createInventarioRouter(prisma, authConfig, createCatalogoSn(workflowOptions.sn)));
+  app.use('/api/inventario', createInventarioRouter(prisma, authConfig, createCatalogoSn(workflowOptions.sn), workflowOptions.sn));
   app.use('/api/consorcios', createConsorciosRouter(prisma, authConfig));
+  app.use('/api/indicadores', createIndicadoresRouter(prisma, bonita, authConfig));
   app.use('/api/internal/bonita', createBonitaCallbacks(prisma, bonita, workflowOptions));
   app.use('/api/emergencias/:id', createWorkflowRouter(prisma, bonita, workflowOptions, authConfig));
   app.use('/api/emergencias', createEmergenciasRouter(prisma, bonita, authConfig));

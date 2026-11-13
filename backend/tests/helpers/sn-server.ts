@@ -9,7 +9,13 @@ export interface SnStubOptions {
   loginStatus?: number;
   /** Fuerza el estado de /tipos-recurso (p. ej. 500 para probar la caída del catálogo). */
   tiposStatus?: number;
+  /** Fichas que devuelve GET /ongs/:externalId (el resto responde 404). */
+  ongs?: Record<string, Record<string, unknown>>;
 }
+
+export const DISPONIBILIDAD = [
+  { tipoRecurso: 'PARAMEDICO', unidad: 'persona', total: 30, bloqueado: 6, disponible: 24, ongs: 2 },
+];
 
 const CERTIFICACIONES = [
   { codigo: 'PARAMEDICO_ALTO', tipoRecurso: 'PARAMEDICO', nivelRiesgoMax: 'CRITICO' },
@@ -55,6 +61,12 @@ export async function snServer(options: SnStubOptions = {}) {
         return json(201, { id: ++compromisoSeq, estado: 'COMPROMETIDO' });
       }
       if (path === '/compromisos/liberar') return json(200, { liberados: 1 });
+      if (path === '/recursos/disponibilidad') return json(200, DISPONIBILIDAD);
+      if (req.method === 'GET' && path.startsWith('/ongs/')) {
+        const externalId = decodeURIComponent(path.slice('/ongs/'.length));
+        const ficha = options.ongs?.[externalId];
+        return ficha ? json(200, ficha) : json(404, { error: 'ONG no encontrada' });
+      }
       return json(404, { error: 'NOT_FOUND' });
     });
   });

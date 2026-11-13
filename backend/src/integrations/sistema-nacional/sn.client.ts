@@ -28,6 +28,15 @@ export interface SnResultadoValidacion {
 
 export interface SnCertificacion { codigo: string; tipoRecurso: string; nivelRiesgoMax: string }
 export interface SnTipoRecurso { codigo: string; unidad: string }
+export interface SnOngFicha {
+  id: number;
+  externalId: string | null;
+  nombre: string;
+  estado: 'PENDIENTE' | 'HABILITADA' | 'SUSPENDIDA';
+  certificaciones: { codigo: string; nombre: string; tipoRecurso: string; nivelRiesgoMax: string; vencimiento: string | null; vigente: boolean }[];
+  recursos: { tipoRecurso: string; unidad: string; total: number; bloqueado: number; disponible: number }[];
+}
+export interface SnDisponibilidad { tipoRecurso: string; unidad: string; total: number; bloqueado: number; disponible: number; ongs: number }
 
 export interface SnCompromisoResult {
   status: number;
@@ -91,6 +100,26 @@ export function createSnClient(config: Extract<SnConfig, { enabled: true }>) {
       const body = await json(res) as unknown;
       const list = Array.isArray(body) ? body : [];
       return list.filter((t): t is SnTipoRecurso => typeof t?.codigo === 'string' && typeof t?.unidad === 'string');
+    },
+    /** Ficha nacional de una ONG (estado, certificaciones, recursos con lo bloqueado); null si el SN no la conoce. */
+    async getOng(externalId: string): Promise<SnOngFicha | null> {
+      const res = await call('/ongs/' + encodeURIComponent(externalId));
+      if (res.status === 404) { await res.body?.cancel(); return null; }
+      if (res.status !== 200) {
+        await res.body?.cancel();
+        throw new SnError('SN_CONSULTA_FAILED', 'No se pudo consultar la ONG en el Sistema Nacional.', res.status);
+      }
+      return await res.json() as SnOngFicha;
+    },
+    /** Disponibilidad global por tipo de recurso (suma de las ONG habilitadas). */
+    async getDisponibilidad(): Promise<SnDisponibilidad[]> {
+      const res = await call('/recursos/disponibilidad');
+      if (res.status !== 200) {
+        await res.body?.cancel();
+        throw new SnError('SN_CONSULTA_FAILED', 'No se pudo consultar la disponibilidad nacional.', res.status);
+      }
+      const body = await json(res) as unknown;
+      return Array.isArray(body) ? body as SnDisponibilidad[] : [];
     },
     /** Alta/actualización idempotente de una ONG por externalId. */
     async syncOng(body: Record<string, unknown>): Promise<void> {

@@ -171,3 +171,64 @@ export async function api<T>(
     throw new ApiError('La API devolvió una respuesta incompleta.');
   return result as ApiResult<T>;
 }
+
+export type EstadoProyecto = 'REGISTRADA' | 'CONVOCATORIA' | 'EVALUACION' | 'EJECUCION' | 'FINALIZADA';
+export interface Duracion { etapa: string; n: number; promedioMs: number; minMs: number; maxMs: number }
+/** Respuesta de `GET /indicadores` (tablero del rol AUDITOR). */
+export interface Indicadores {
+  generadoAt: string;
+  filtros: { desde: string | null; hasta: string | null; gravedad: Gravedad | null };
+  resumen: {
+    emergencias: number;
+    finalizadas: number;
+    enCurso: number;
+    suministrosMovilizados: number;
+    adjudicaciones: number;
+    adjudicacionesConsorcio: number;
+    porcentajeConsorcio: number | null;
+    emergenciasConConsorcio: number;
+    coberturaPromedio: number | null;
+    duracionPromedioMs: number | null;
+  };
+  suministrosPorMes: { mes: string; personal: number; recurso: number }[];
+  estados: { estado: EstadoProyecto; etiqueta: string; cantidad: number }[];
+  gravedad: { gravedad: Gravedad; cantidad: number }[];
+  validaciones: { resultado: OfertaValidacion['resultado']; cantidad: number }[];
+  ongs: { organizacion: string; cantidad: number; adjudicaciones: number; viaConsorcio: number }[];
+  tiemposLocales: Duracion[];
+  bonita: {
+    disponible: boolean;
+    motivo: string | null;
+    casosConsultados: number;
+    casosFinalizados: number;
+    duracionCasoPromedioMs: number | null;
+    etapas: Duracion[];
+  };
+  emergencias: {
+    id: string;
+    zona: string;
+    gravedad: Gravedad;
+    estado: EstadoProyecto;
+    creadaAt: string;
+    cerradaAt: string | null;
+    bonitaCaseId: string | null;
+    rondas: number;
+    lotes: number;
+    cantidadRequerida: number;
+    cantidadAdjudicada: number;
+    cobertura: number | null;
+    usaConsorcio: boolean;
+    duracionMs: number | null;
+  }[];
+}
+
+/** Respuesta de `GET /inventario/nacional`: lo que el Sistema Nacional sabe de la ONG logueada. */
+export interface InventarioNacional {
+  conectado: boolean;
+  ong: {
+    estado: 'PENDIENTE' | 'HABILITADA' | 'SUSPENDIDA';
+    certificaciones: { codigo: string; nombre: string; tipoRecurso: string; nivelRiesgoMax: string; vencimiento: string | null; vigente: boolean }[];
+    recursos: { tipoRecurso: string; unidad: string; total: number; bloqueado: number; disponible: number }[];
+  } | null;
+  disponibilidad: { tipoRecurso: string; unidad: string; total: number; bloqueado: number; disponible: number; ongs: number }[];
+}

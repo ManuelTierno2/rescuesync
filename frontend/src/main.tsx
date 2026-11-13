@@ -40,7 +40,7 @@ function AppShell() {
             {(user?.rol === 'COORDINADOR' || user?.rol === 'AUDITOR') && (
               <Link to="/organizaciones">Organizaciones</Link>
             )}
-            {user?.rol === 'AUDITOR' && <Link to="/auditoria">Auditoría</Link>}
+            {user?.rol === 'AUDITOR' && <Link to="/auditoria">Indicadores</Link>}
           </nav>
           <div className="header-user">
             {user ? (
@@ -82,7 +82,7 @@ function AppShell() {
             />
           </Routes>
         </main>
-        <footer>RescueSync · Entrega 2</footer>
+        <footer>RescueSync · DSSD 2026</footer>
       </div>
     </BrowserRouter>
   );

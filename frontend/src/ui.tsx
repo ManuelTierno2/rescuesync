@@ -72,3 +72,17 @@ export const formatDate = (value: string) =>
     new Date(value),
   );
 export const formatNumber = (value: number) => new Intl.NumberFormat('es-AR').format(value);
+export const formatPercent = (value: number | null) =>
+  value === null ? '—' : new Intl.NumberFormat('es-AR', { style: 'percent', maximumFractionDigits: 1 }).format(value);
+/** Duración legible: "45 s", "12 min", "3 h 20 min", "2 d 4 h". */
+export function formatDuracion(ms: number | null) {
+  if (ms === null) return '—';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const min = Math.round(s / 60);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return min % 60 ? `${h} h ${min % 60} min` : `${h} h`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d} d ${h % 24} h` : `${d} d`;
+}

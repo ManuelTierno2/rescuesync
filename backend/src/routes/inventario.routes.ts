@@ -13,11 +13,14 @@ import { actualizarInventario, crearInventario, listarInventario } from '../serv
 import type { AuthConfig } from '../config/env.js';
 import { readAuthConfig } from '../config/env.js';
 import { createCatalogoSn, type CatalogoSnService } from '../services/catalogo-sn.service.js';
+import type { SnClient } from '../integrations/sistema-nacional/sn.client.js';
+import { AppError } from '../errors/app-error.js';
 
 export function createInventarioRouter(
   prisma: PrismaClient,
   authConfig: AuthConfig = readAuthConfig(),
   catalogo: CatalogoSnService = createCatalogoSn(),
+  sn?: SnClient,
 ) {
   const router = Router();
   const { requireRole } = createAuthMiddleware(prisma, authConfig);
@@ -30,6 +33,23 @@ export function createInventarioRouter(
   router.get('/codigos-sn', requireRole('ONG'), async (_req, res) => {
     const { items, origen } = await catalogo.listar();
     res.json({ data: items, origen });
+  });
+
+  /**
+   * Lo que el Sistema Nacional sabe de la ONG logueada (externalId = id del usuario ONG local) y la
+   * disponibilidad global. La ONG se registra en el SN al validarse su primera oferta: antes, `ong` es null.
+   */
+  router.get('/nacional', requireRole('ONG'), async (req, res) => {
+    if (!sn) {
+      res.json({ data: { conectado: false, ong: null, disponibilidad: [] } });
+      return;
+    }
+    try {
+      const [ong, disponibilidad] = await Promise.all([sn.getOng(req.user!.id), sn.getDisponibilidad()]);
+      res.json({ data: { conectado: true, ong, disponibilidad } });
+    } catch {
+      throw new AppError(502, 'SN_NO_DISPONIBLE', 'No se pudo consultar el Sistema Nacional. Intente nuevamente en un minuto.');
+    }
   });
 
   router.post('/', requireRole('ONG'), validate(crearInventarioSchema, 'body'), async (req, res) => {

@@ -39,7 +39,7 @@ export async function bonitaServer(options: StubOptions = {}) {
   const failures: unknown[] = [];
   const tasks: StubTask[] = [];
   const archivedTasks: (StubTask & { sourceObjectId: string })[] = [];
-  const cases = new Map<string, { processId: string; completed: boolean; recipients: string[] }>();
+  const cases = new Map<string, { processId: string; completed: boolean; recipients: string[]; start?: string; end?: string }>();
   function addTask(caseId: string, name: string, ongUsuarioId?: string) {
     if (!cases.has(caseId)) cases.set(caseId, { processId: PROCESS_ID, completed: false, recipients: [] });
     const task: StubTask = { id: String(++sequence), caseId, name, state: 'ready', assigned_id: '0', ongUsuarioId };
@@ -148,11 +148,13 @@ export async function bonitaServer(options: StubOptions = {}) {
         }
       } else if (pathname === '/bonita/API/bpm/archivedHumanTask') { page(archivedTasks as unknown as Record<string, unknown>[]);
       } else if (pathname === '/bonita/API/bpm/archivedCase') {
-        page([...cases].filter(([, c]) => c.completed).map(([caseId]) => ({ id: String(++sequence), sourceObjectId: caseId, state: 'completed' })));
+        page([...cases].filter(([, c]) => c.completed).map(([caseId, c]) => ({
+          id: String(++sequence), sourceObjectId: caseId, state: 'completed', start: c.start ?? '', end_date: c.end ?? '',
+        })));
       } else if (pathname.startsWith('/bonita/API/bpm/case/')) {
         const caseId = pathname.split('/').at(-1)!; const c = cases.get(caseId);
         if (!c || c.completed) res.writeHead(404).end('{}');
-        else res.end(JSON.stringify({ id: caseId, processDefinitionId: c.processId }));
+        else res.end(JSON.stringify({ id: caseId, processDefinitionId: c.processId, start: c.start ?? '' }));
       } else if (pathname.startsWith('/bonita/API/bpm/activityVariable/')) {
         const task = tasks.find(t => t.id === pathname.split('/').at(-2));
         if (!task?.ongUsuarioId) res.writeHead(404).end('{}');
