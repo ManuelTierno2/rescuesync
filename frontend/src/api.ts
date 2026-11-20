@@ -222,13 +222,3 @@ export interface Indicadores {
   }[];
 }
 
-/** Respuesta de `GET /inventario/nacional`: lo que el Sistema Nacional sabe de la ONG logueada. */
-export interface InventarioNacional {
-  conectado: boolean;
-  ong: {
-    estado: 'PENDIENTE' | 'HABILITADA' | 'SUSPENDIDA';
-    certificaciones: { codigo: string; nombre: string; tipoRecurso: string; nivelRiesgoMax: string; vencimiento: string | null; vigente: boolean }[];
-    recursos: { tipoRecurso: string; unidad: string; total: number; bloqueado: number; disponible: number }[];
-  } | null;
-  disponibilidad: { tipoRecurso: string; unidad: string; total: number; bloqueado: number; disponible: number; ongs: number }[];
-}

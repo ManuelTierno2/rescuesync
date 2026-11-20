@@ -87,6 +87,92 @@ export async function bloquear(inp: BloqueoIn) {
   }
 }
 
+export type LoteIn = { emergenciaId: string; compromisos: { loteId: string; ongId: string | number; items: ItemIn[] }[] };
+type FaltanteLote = Faltante & { loteId: string; ongId: string };
+
+/**
+ * Compromete en UNA transacción todos los compromisos de una adjudicación (varios lotes y/o ONGs).
+ * Es el endpoint que invoca Bonita: una sola llamada, todo o nada. Si un compromiso no alcanza, no se
+ * bloquea ninguno y la respuesta 409 detalla qué faltó. Toma los locks de todas las ONG involucradas
+ * ordenados por id (mismo orden que `bloquear` y `liberar`, sin deadlocks) y descuenta el stock que
+ * comparten dos lotes de la misma ONG dentro del mismo pedido. Idempotente por (emergencia, lote, ONG).
+ */
+export async function bloquearLote(inp: LoteIn) {
+  const refs = [...new Set(inp.compromisos.map((c) => String(c.ongId)))];
+  const ongs = await prisma.ong.findMany({
+    where: { OR: refs.map((ref) => (/^\d+$/.test(ref) ? { id: Number(ref) } : { externalId: ref })) },
+  });
+  const ongDe = (ref: string | number) =>
+    ongs.find((o) => (/^\d+$/.test(String(ref)) ? o.id === Number(ref) : o.externalId === String(ref)));
+  const codigos = [...new Set(inp.compromisos.flatMap((c) => c.items.map((i) => i.tipoRecurso)))];
+  const tipos = await prisma.tipoRecurso.findMany({ where: { codigo: { in: codigos } } });
+  const faltan = codigos.filter((c) => !tipos.some((t) => t.codigo === c));
+  if (faltan.length) return { status: 400, error: `tipos de recurso inexistentes: ${faltan.join(", ")}` } as const;
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const sinOng = inp.compromisos.filter((c) => !ongDe(c.ongId));
+      if (sinOng.length) throw new Conflicto(409, sinOng.map((c) => ({ loteId: c.loteId, ongId: String(c.ongId),
+        tipoRecurso: c.items[0]?.tipoRecurso ?? "", solicitado: 0, disponible: 0, resultado: "SIN_CAPACIDAD", motivo: "ONG no registrada en el Sistema Nacional" })) as Faltante[]);
+      const ongIds = [...new Set(inp.compromisos.map((c) => ongDe(c.ongId)!.id))];
+      await tx.$queryRaw`SELECT id FROM ${Prisma.raw(tabla("OngRecurso"))} WHERE "ongId" IN (${Prisma.join(ongIds)}) ORDER BY id FOR UPDATE`;
+
+      const [recursos, certs] = await Promise.all([
+        tx.ongRecurso.findMany({ where: { ongId: { in: ongIds } } }),
+        tx.ongCertificacion.findMany({ where: { ongId: { in: ongIds } }, include: { certificacion: { include: { tipoRecurso: true } } } }),
+      ]);
+      const hoy = new Date();
+      const usado = new Map<number, number>(); // ongRecurso.id → cantidad tomada en este mismo pedido
+      const faltantes: FaltanteLote[] = [];
+      const nuevos: { c: LoteIn["compromisos"][number]; ongId: number }[] = [];
+      const repetidos: number[] = [];
+      for (const c of inp.compromisos) {
+        const ong = ongDe(c.ongId)!;
+        const previo = await tx.compromiso.findUnique({ where: { emergenciaId_loteId_ongId: { emergenciaId: inp.emergenciaId, loteId: c.loteId, ongId: ong.id } } });
+        if (previo?.estado === "ACTIVO") { repetidos.push(previo.id); continue; }
+        if (previo) {
+          faltantes.push({ loteId: c.loteId, ongId: String(c.ongId), tipoRecurso: c.items[0]?.tipoRecurso ?? "", solicitado: 0, disponible: 0,
+            resultado: "SIN_CAPACIDAD", motivo: "El compromiso de este lote ya fue liberado" });
+          continue;
+        }
+        for (const it of c.items) {
+          const tipo = tipos.find((t) => t.codigo === it.tipoRecurso)!;
+          const r = recursos.find((x) => x.ongId === ong.id && x.tipoRecursoId === tipo.id);
+          const disponible = r ? r.total - r.bloqueado - (usado.get(r.id) ?? 0) : 0;
+          const certNiveles = certs
+            .filter((x) => x.ongId === ong.id && x.certificacion.tipoRecurso.codigo === it.tipoRecurso && (!x.vencimiento || x.vencimiento > hoy))
+            .map((x) => x.certificacion.nivelRiesgoMax);
+          const ev = evaluar({ cantidad: it.cantidad, nivelRiesgo: "BAJO" }, { habilitada: ong.estado === "HABILITADA", certNiveles, disponible });
+          if (ev.resultado !== "COMPLETA")
+            faltantes.push({ loteId: c.loteId, ongId: String(c.ongId), tipoRecurso: it.tipoRecurso, solicitado: it.cantidad, disponible, resultado: ev.resultado, motivo: ev.motivo });
+          else usado.set(r!.id, (usado.get(r!.id) ?? 0) + it.cantidad);
+        }
+        nuevos.push({ c, ongId: ong.id });
+      }
+      if (faltantes.length) throw new Conflicto(409, faltantes);
+
+      for (const [id, cantidad] of usado) await tx.ongRecurso.update({ where: { id }, data: { bloqueado: { increment: cantidad } } });
+      const creados: number[] = [];
+      for (const { c, ongId } of nuevos) {
+        const creado = await tx.compromiso.create({ data: {
+          emergenciaId: inp.emergenciaId, loteId: c.loteId, ongId,
+          items: { create: c.items.map((i) => ({ tipoRecursoId: tipos.find((t) => t.codigo === i.tipoRecurso)!.id, cantidad: i.cantidad })) },
+        } });
+        creados.push(creado.id);
+      }
+      const todos = await tx.compromiso.findMany({ where: { id: { in: [...creados, ...repetidos] } }, include: incluir, orderBy: { id: "asc" } });
+      return {
+        status: creados.length ? 201 : 200,
+        compromisos: todos.map((c) => ({ ...vista(c), repetido: repetidos.includes(c.id) })),
+      } as const;
+    });
+  } catch (e) {
+    if (e instanceof Conflicto)
+      return { status: e.status, error: "No se pudieron comprometer todos los recursos; no se bloqueó ninguno", detalle: e.detalle } as const;
+    throw e;
+  }
+}
+
 export type LiberarIn = { emergenciaId: string; ongId?: string | number; loteId?: string };
 
 /**
@@ -140,6 +226,18 @@ compromisosRouter.post("/compromisos", requireAuth("ADMIN"), async (req, res) =>
     return res.status(400).json({ error: "Se requiere {emergenciaId, loteId, ongId, items: [{tipoRecurso, cantidad > 0}]} sin tipos repetidos" });
   const r = await bloquear({ emergenciaId, loteId, ongId, items });
   if ("compromiso" in r) return res.status(r.status).json({ ...r.compromiso, repetido: r.repetido });
+  res.status(r.status).json({ error: r.error, ...("detalle" in r && { detalle: r.detalle }) });
+});
+
+compromisosRouter.post("/compromisos/lote", requireAuth("ADMIN"), async (req, res) => {
+  const { emergenciaId, compromisos } = req.body ?? {};
+  const valido = (c: any) => esTxt(c?.loteId) && (esTxt(c?.ongId) || Number.isInteger(c?.ongId)) &&
+    Array.isArray(c.items) && c.items.length > 0 && c.items.every(esItem) && new Set(c.items.map((i: ItemIn) => i.tipoRecurso)).size === c.items.length;
+  if (!esTxt(emergenciaId) || !Array.isArray(compromisos) || compromisos.length === 0 || compromisos.length > 200 || !compromisos.every(valido) ||
+      new Set(compromisos.map((c: any) => `${c.loteId}|${c.ongId}`)).size !== compromisos.length)
+    return res.status(400).json({ error: "Se requiere {emergenciaId, compromisos: [{loteId, ongId, items: [{tipoRecurso, cantidad > 0}]}]} sin lote+ONG repetidos" });
+  const r = await bloquearLote({ emergenciaId, compromisos });
+  if ("compromisos" in r) return res.status(r.status).json({ emergenciaId, compromisos: r.compromisos });
   res.status(r.status).json({ error: r.error, ...("detalle" in r && { detalle: r.detalle }) });
 });
 

@@ -65,7 +65,23 @@ async function fixture(enabled = true, options: StubOptions = {}, compatible = t
     const response = await callback('evaluar', activityId).expect(200);
     stub.expire(caseId, response.body.data.lotesCubiertos, recipients); return response.body.data;
   };
-  return { id, caseId, app, stub, created, post, lote, oferta, callback, open, expire };
+  /** Simula los conectores de «Registrar compromiso de recursos» (1.8): pedido al back, respuesta del SN e informe. */
+  const comprometer = async (status = 201, snBody: object = { compromisos: [] }) => {
+    const pedido = await request(app).post(`/api/internal/bonita/emergencias/${id}/adjudicacion/compromisos`)
+      .set('Authorization', 'Bearer ' + secret).send({ caseId }).expect(200);
+    const resultado = await request(app).post(`/api/internal/bonita/emergencias/${id}/adjudicacion/resultado`)
+      .set('Authorization', 'Bearer ' + secret).send({ caseId, status, body: JSON.stringify(snBody) }).expect(200);
+    stub.compromiso(caseId, resultado.body.data.compromisoOk);
+    return { pedido: pedido.body.data, resultado: resultado.body.data };
+  };
+  /** Simula los conectores de «Liberar recursos» (1.8): respuesta del SN e informe de cierre. */
+  const liberar = async (status = 200) => {
+    const r = await request(app).post(`/api/internal/bonita/emergencias/${id}/cierre/resultado`)
+      .set('Authorization', 'Bearer ' + secret).send({ caseId, status, body: '{"liberados":1}' });
+    if (r.status === 200) stub.liberacion(caseId);
+    return r;
+  };
+  return { id, caseId, app, stub, created, post, lote, oferta, callback, open, expire, comprometer, liberar };
 }
 
 describe('Workflow, PostgreSQL y motor Bonita falso', () => {
@@ -82,6 +98,9 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
       await f.post('finalizar-monitoreo').expect(409);
       await f.post('ver-ofertas', M).expect(200);
       await f.post('adjudicar', M, { ofertaIds: [a1.id, a2.id] }).expect(200);
+      await f.post('finalizar-monitoreo').expect(409); // el compromiso nacional todavía no se confirmó
+      const { pedido } = await f.comprometer();
+      assert.deepEqual(pedido.compromisos.map((c: { ongId: string }) => c.ongId), [A, A]);
       assert.equal(f.stub.tasks.filter(t => t.name === 'Marcar actividad finalizada').length, 0);
       await f.post('finalizar-monitoreo', C, { ongDestinatariosInput: [B] }).expect(400);
       f.stub.options.delayExecutionMs = 650;
@@ -101,8 +120,10 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
       await f.post('leer', A).expect(200);
       await f.post('finalizar-actividad', A).expect(200);
       await f.post('cerrar').expect(200);
+      assert.equal((await prisma.emergencia.findUniqueOrThrow({ where: { id: f.id } })).cerrada_at, null); // espera la liberación
+      await f.liberar();
       const state = (await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data;
-      assert.equal(state.state, 'COMPLETED');
+      assert.equal(state.state, 'COMPLETED'); assert.equal(state.localClosed, true);
     } finally { await f.stub.close(); }
   });
   for (const monitorFirst of [true, false]) it(`recorrido completo con dos ONG y monitoreo ${monitorFirst ? 'antes' : 'después'} de actividades`, async () => {
@@ -126,16 +147,25 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
       await f.post('ver-ofertas', M).expect(200);
       const selection = await f.post('adjudicar', M, { ofertaIds: [a.id, b.id] }).expect(200);
       assert.equal(selection.body.data.estado, 'CONFIRMADO');
-      assert.equal(selection.body.data.task_id, null);
+      assert.equal(selection.body.data.task_name, 'Seleccionar y adjudicar ofertas');
       const repeat = await f.post('adjudicar', M, { accionId: selection.body.data.id, ofertaIds: [b.id, a.id] }).expect(200);
       assert.equal(repeat.body.data.id, selection.body.data.id);
       await f.post('adjudicar', M, { ofertaIds: [a.id] }).expect(409);
+      const pendiente = (await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data;
+      assert.equal(pendiente.compromiso.estado, 'PENDIENTE');
+      assert.equal(await prisma.adjudicacion.count({ where: { oferta_id: { in: [a.id, b.id] } } }), 0);
+      const { pedido } = await f.comprometer(201, { compromisos: [
+        { id: 41, loteId: l.id, externalId: A }, { id: 42, loteId: l.id, externalId: B }] });
+      assert.deepEqual(pedido.compromisos.map((c: { ongId: string; items: unknown }) => [c.ongId, c.items]).sort(),
+        [[A, [{ tipoRecurso: 'RACION_ALIMENTO', cantidad: 4 }]], [B, [{ tipoRecurso: 'RACION_ALIMENTO', cantidad: 6 }]]].sort());
+      assert.deepEqual((await prisma.adjudicacion.findMany({ where: { oferta_id: { in: [a.id, b.id] } } })).map(x => x.sn_compromiso_id).sort(), [41, 42]);
       const before = (await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data;
       assert.equal(before.readyTasks.length, 3);
       assert.ok(before.readyTasks.some((t: { name: string }) => t.name === 'Monitorear despliegue'));
       assert.deepEqual(new Set(before.readyTasks.filter((t: { name: string }) => t.name === 'Marcar actividad finalizada').map((t: { ongUsuarioId: string }) => t.ongUsuarioId)), new Set([A, B]));
-      assert.ok(before.availableActions.includes('ver-ofertas'));
-      assert.ok(before.availableActions.includes('adjudicar'));
+      assert.equal(before.compromiso.estado, 'CONFIRMADO');
+      assert.ok(!before.availableActions.includes('ver-ofertas'));
+      assert.ok(!before.availableActions.includes('adjudicar'));
       assert.ok(before.availableActions.includes('finalizar-monitoreo'));
       assert.ok(before.availableActions.includes('finalizar-actividad'));
       assert.ok(!before.availableActions.includes('decidir'));
@@ -147,6 +177,8 @@ describe('Workflow, PostgreSQL y motor Bonita falso', () => {
       await f.post('finalizar-actividad', B).expect(200);
       if (!monitorFirst) await f.post('finalizar-monitoreo').expect(200);
       await f.post('cerrar').expect(200);
+      assert.equal((await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data.cierrePendiente, true);
+      await f.liberar();
       const state = (await request(f.app).get(`/api/emergencias/${f.id}/workflow`).expect(200)).body.data;
       assert.equal(state.state, 'COMPLETED'); assert.equal(state.localClosed, true); assert.deepEqual(state.readyTasks, []);
       assert.equal(f.stub.requests.filter(r => r.path.endsWith('/instantiation')).length, 1);

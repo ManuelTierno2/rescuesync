@@ -36,7 +36,7 @@ export function createApp(
   app.use('/api/auth', createAuthRouter(prisma, authConfig));
   app.use('/api/usuarios', createUsuariosRouter(prisma));
   app.use('/api/organizaciones', createOrganizacionesRouter(prisma, authConfig));
-  app.use('/api/inventario', createInventarioRouter(prisma, authConfig, createCatalogoSn(workflowOptions.sn), workflowOptions.sn));
+  app.use('/api/inventario', createInventarioRouter(prisma, authConfig, createCatalogoSn()));
   app.use('/api/consorcios', createConsorciosRouter(prisma, authConfig));
   app.use('/api/indicadores', createIndicadoresRouter(prisma, bonita, authConfig));
   app.use('/api/internal/bonita', createBonitaCallbacks(prisma, bonita, workflowOptions));

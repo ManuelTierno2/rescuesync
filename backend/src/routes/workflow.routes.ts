@@ -88,5 +88,17 @@ export function createBonitaCallbacks(prisma: PrismaClient, bonita: BonitaServic
     }), req.body);
     res.json(await service.validacionResultado(parse(uuid, req.params.id), input));
   });
+  // RescueSync 1.8: compromiso y liberación en el SN los invoca Bonita; el back solo arma el pedido y registra la respuesta.
+  const caseOnly = z.object({ caseId: z.string().refine(isBonitaId) }).strict();
+  const respuestaSn = caseOnly.extend({ status: z.coerce.number().int().min(100).max(599), body: z.unknown().optional() });
+  router.post('/emergencias/:id/adjudicacion/compromisos', async (req, res) => {
+    res.json(await service.compromisosPendientes(parse(uuid, req.params.id), parse(caseOnly, req.body)));
+  });
+  router.post('/emergencias/:id/adjudicacion/resultado', async (req, res) => {
+    res.json(await service.compromisoResultado(parse(uuid, req.params.id), parse(respuestaSn, req.body)));
+  });
+  router.post('/emergencias/:id/cierre/resultado', async (req, res) => {
+    res.json(await service.cierreResultado(parse(uuid, req.params.id), parse(respuestaSn, req.body)));
+  });
   return router;
 }

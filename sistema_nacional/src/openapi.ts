@@ -200,6 +200,34 @@ export const openapi = {
         responses: { 200: ok("Lista", arr(ref("Compromiso"))), 400: err("estado inválido"), 401: R401, 403: R403 },
       },
     },
+    "/compromisos/lote": {
+      post: {
+        tags: ["Compromisos"], summary: "Bloquear todos los recursos de una adjudicación en una sola transacción (ADMIN)",
+        description:
+          "Lo invoca Bonita (tarea «Registrar compromiso de recursos») con todos los compromisos que adjudicó el municipio: " +
+          "uno por lote y ONG. Todo o nada: toma con `SELECT ... FOR UPDATE` las filas de inventario de todas las ONG involucradas, " +
+          "ordenadas por id, y si un compromiso no alcanza no bloquea ninguno (409 con el detalle por lote, ONG y recurso). " +
+          "Dos lotes de la misma ONG comparten su stock dentro del pedido. Idempotente por (emergenciaId, loteId, ongId): " +
+          "repetir el pedido devuelve los compromisos existentes con `repetido: true` y 200.",
+        security: bearer,
+        requestBody: body(obj({
+          emergenciaId: str,
+          compromisos: arr(obj({ loteId: str, ongId: { oneOf: [int, str] }, items: arr(ref("ItemCompromiso")) }, ["loteId", "ongId", "items"])),
+        }, ["emergenciaId", "compromisos"]), {
+          emergenciaId: "EM-2026-001",
+          compromisos: [
+            { loteId: "lote-7", ongId: "ong-a", items: [{ tipoRecurso: "PARAMEDICO", cantidad: 5 }] },
+            { loteId: "lote-8", ongId: "ong-b", items: [{ tipoRecurso: "RACION_ALIMENTO", cantidad: 200 }] },
+          ],
+        }),
+        responses: {
+          201: ok("Compromisos creados", obj({ emergenciaId: str, compromisos: arr(ref("CompromisoCreado")) })),
+          200: ok("Reintento: todos los compromisos ya existían", obj({ emergenciaId: str, compromisos: arr(ref("CompromisoCreado")) })),
+          400: err("Datos inválidos o tipos de recurso inexistentes"), 401: R401, 403: R403,
+          409: err("Algún compromiso no alcanza (ONG inexistente o no habilitada, sin certificación, sin stock o ya liberado); no se bloqueó ninguno", ref("ErrorStock")),
+        },
+      },
+    },
     "/compromisos/liberar": {
       post: {
         tags: ["Compromisos"], summary: "Liberar recursos al finalizar o cerrar (ADMIN)",

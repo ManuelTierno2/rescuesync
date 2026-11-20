@@ -15,10 +15,12 @@ export type BonitaConfig = { enabled: false } | {
 export function actorForTaskName(name: string): BonitaActor {
   switch (name) {
     case 'Registrar emergencia':
+    case 'Seleccionar y adjudicar ofertas':
       return 'municipio';
     case 'Generar y publicar lotes':
     case 'Evaluar curso alternativo':
     case 'Monitorear despliegue':
+    case 'Cerrar operativo':
       return 'coordinador';
     case 'Cargar o editar ofertas':
     case 'Marcar actividad finalizada':

@@ -3,7 +3,6 @@ import { api, type CodigoSn, type InventarioItem } from '../api';
 import { useAuth } from '../auth-context';
 import { useApiData, useSubmission } from '../hooks';
 import { ErrorMessage, Field, Loading, Success, formatNumber } from '../ui';
-import { DisponibilidadNacional } from '../components/DisponibilidadNacional';
 
 export function InventarioPage() {
   const { user } = useAuth();
@@ -43,8 +42,6 @@ export function InventarioPage() {
           <p className="muted">Stock disponible para ofertar en convocatorias. El código del Sistema Nacional es obligatorio: toda oferta se respalda en un ítem con código.</p>
         </div>
       </div>
-      <DisponibilidadNacional />
-      <h2>Inventario local</h2>
       <ErrorMessage error={query.error} retry={query.refresh} />
       {query.loading && <Loading />}
       <ul className="list-plain">

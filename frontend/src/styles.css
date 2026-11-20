@@ -657,7 +657,3 @@ button.secondary:hover:not(:disabled) { background: #edf2ee; }
   .bar-list li { grid-template-columns: 1fr; gap: 0.2rem; }
   .stat-value { font-size: 1.5rem; }
 }
-.nacional { display: grid; gap: 0.6rem; margin-bottom: 1.5rem; }
-.nacional h3 { margin: 0.6rem 0 0; font-size: 0.95rem; }
-.nacional p { margin: 0; }
-.cert-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.88rem; }

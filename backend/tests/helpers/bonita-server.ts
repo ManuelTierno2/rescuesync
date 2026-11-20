@@ -55,9 +55,17 @@ export async function bonitaServer(options: StubOptions = {}) {
     const c = cases.get(caseId) ?? { processId: PROCESS_ID, completed: false, recipients: [] };
     if (!cases.has(caseId)) cases.set(caseId, c);
     if (recipients) c.recipients = recipients;
+    addTask(caseId, 'Seleccionar y adjudicar ofertas');
+  }
+  /** Simula la tarea de servicio «Registrar compromiso de recursos» y el XOR «¿Compromiso confirmado?» (1.8). */
+  function compromiso(caseId: string, ok: boolean) {
+    const c = cases.get(caseId)!;
+    if (!ok) { addTask(caseId, 'Seleccionar y adjudicar ofertas'); return; }
     addTask(caseId, 'Monitorear despliegue');
     if (!options.monitorRecipientsContract) for (const r of c.recipients) addTask(caseId, 'Marcar actividad finalizada', r);
   }
+  /** Simula la tarea de servicio «Liberar recursos»: el caso termina. */
+  function liberacion(caseId: string) { cases.get(caseId)!.completed = true; }
   function advance(task: StubTask, values: Record<string, unknown>) {
     task.state = 'completed'; archivedTasks.push({ ...task, id: String(++sequence), sourceObjectId: task.id });
     const c = cases.get(task.caseId)!;
@@ -68,7 +76,7 @@ export async function bonitaServer(options: StubOptions = {}) {
       case 'Evaluar curso alternativo':
         if (values.decisionCurso === 'REABRIR') add('Cargar o editar ofertas');
         else if (values.decisionCurso === 'REFORMULAR') add('Generar y publicar lotes');
-        else add('Monitorear despliegue');
+        else add('Seleccionar y adjudicar ofertas');
         break;
       case 'Monitorear despliegue':
         if (options.monitorRecipientsContract) {
@@ -78,7 +86,7 @@ export async function bonitaServer(options: StubOptions = {}) {
         // fall through: un caso termina después de todas las actividades finales.
       case 'Marcar actividad finalizada':
         if (!tasks.some(t => t.caseId === task.caseId && ['Monitorear despliegue', 'Marcar actividad finalizada'].includes(t.name) && t.state === 'ready'))
-          c.completed = true;
+          add('Cerrar operativo');
         break;
     }
   }
@@ -220,7 +228,7 @@ export async function bonitaServer(options: StubOptions = {}) {
     processId: PROCESS_ID, timeoutMs: 3000,
   };
   return {
-    tasks, archivedTasks, cases, addTask, expire, options,
+    tasks, archivedTasks, cases, addTask, expire, compromiso, liberacion, options,
     requests, failures, config, sessions,
     close: async () => {
       await new Promise<void>((resolve, reject) => {

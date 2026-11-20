@@ -7,7 +7,11 @@ export interface Round {
 export interface Participation { ong_usuario_id: string; ong_usuario: Usuario; lectura_at: string | null; finalizada_at: string | null }
 export interface Workflow {
   enabled: boolean; caseId: string | null; state: string; compatible: boolean; localClosed: boolean;
-  validationMode: 'PENDIENTE' | 'DESARROLLO'; validacionSn: boolean; seleccionHabilitada: boolean; round: Round | null;
+  validationMode: 'PENDIENTE' | 'DESARROLLO'; validacionSn: boolean;
+  /** Compromiso nacional de la ronda vigente: lo confirma Bonita (conector «Registrar compromiso de recursos»). */
+  compromiso: { estado: 'PENDIENTE' | 'CONFIRMADO' | 'RECHAZADO'; motivo: string | null } | null;
+  /** El coordinador cerró y Bonita está liberando los recursos en el Sistema Nacional. */
+  cierrePendiente: boolean; seleccionHabilitada: boolean; round: Round | null;
   readyTasks: { id: string; name: string; ongUsuarioId?: string }[]; availableActions: string[];
   windows: { id: string; vence_at: string; cerrada_at: string | null }[];
   actions: { id: string; accion: string; actor_id: string; estado: string; task_id: string | null }[];

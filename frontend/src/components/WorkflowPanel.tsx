@@ -98,7 +98,10 @@ export function WorkflowPanel({ id, query, onChanged }: { id: string; query: Ret
     </section>
     <section className="card" aria-label="Acciones del operativo">
       <h2>Acciones del operativo</h2>
-      <p className="notice warning">{data.validacionSn ? 'Ofertas validadas por el Sistema Nacional. Al adjudicar se comprometen sus recursos y se liberan al cerrar el operativo.'
+      {data.compromiso?.estado === 'PENDIENTE' && <p className="notice warning" role="status">Adjudicación enviada. Bonita está comprometiendo los recursos en el Sistema Nacional; las ONG se notifican cuando el compromiso se confirma. Actualizá el estado en unos segundos.</p>}
+      {data.compromiso?.estado === 'RECHAZADO' && <p className="notice error" role="alert">El Sistema Nacional no pudo comprometer los recursos: {data.compromiso.motivo}. No se bloqueó ningún recurso; elegí otra combinación de ofertas.</p>}
+      {data.cierrePendiente && <p className="notice warning" role="status">Cierre enviado. Bonita está liberando los recursos en el Sistema Nacional; el operativo queda cerrado cuando se confirma la liberación.</p>}
+      <p className="notice warning">{data.validacionSn ? 'Ofertas validadas por el Sistema Nacional. Al confirmar la adjudicación, Bonita compromete los recursos en el Sistema Nacional; al cerrar el operativo, los libera.'
         : data.validationMode === 'DESARROLLO' ? 'Validación de desarrollo: ofertas activas consideradas disponibles. Sistema Nacional real pendiente.'
         : 'Validación del Sistema Nacional pendiente. La selección se habilita cuando la convocatoria venza y el SN valide las ofertas.'}</p>
       <ErrorMessage error={error} />

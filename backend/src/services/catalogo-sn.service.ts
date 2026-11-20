@@ -1,10 +1,11 @@
 import { AppError } from '../errors/app-error.js';
-import type { SnClient, SnTipoRecurso } from '../integrations/sistema-nacional/sn.client.js';
+
+export interface SnTipoRecurso { codigo: string; unidad: string }
 
 /**
- * Catálogo usado solo cuando el SN no está configurado (modo degradado/desarrollo).
- * Con el SN activo la fuente de verdad es su API (`GET /tipos-recurso`), por lo que un código nuevo
- * del SN queda disponible sin tocar este back.
+ * Códigos de recurso del catálogo nacional (los mismos que siembra el Sistema Nacional).
+ * Es una copia local: la aplicación web no invoca la API del cloud (solo Bonita lo hace), así que
+ * agregar un código nuevo en el SN requiere sumarlo también acá.
  */
 export const CODIGOS_SN_LOCAL: SnTipoRecurso[] = [
   { codigo: 'PARAMEDICO', unidad: 'persona' },
@@ -14,23 +15,11 @@ export const CODIGOS_SN_LOCAL: SnTipoRecurso[] = [
   { codigo: 'VEHICULO_RESCATE', unidad: 'vehiculo' },
 ];
 
-export interface CatalogoSn { items: SnTipoRecurso[]; origen: 'SN' | 'LOCAL' }
+export interface CatalogoSn { items: SnTipoRecurso[]; origen: 'LOCAL' }
 
-export function createCatalogoSn(sn?: SnClient, ttlMs = 60_000) {
-  let cache: { at: number; items: SnTipoRecurso[] } | null = null;
-
-  /** Si el SN falla se usa la última copia conocida; sin copia, el error del SN llega al cliente (502). */
+export function createCatalogoSn() {
   async function listar(): Promise<CatalogoSn> {
-    if (!sn) return { items: CODIGOS_SN_LOCAL, origen: 'LOCAL' };
-    if (cache && Date.now() - cache.at < ttlMs) return { items: cache.items, origen: 'SN' };
-    try {
-      const items = await sn.getTiposRecurso();
-      cache = { at: Date.now(), items };
-      return { items, origen: 'SN' };
-    } catch (error) {
-      if (cache) return { items: cache.items, origen: 'SN' };
-      throw error;
-    }
+    return { items: CODIGOS_SN_LOCAL, origen: 'LOCAL' };
   }
 
   async function validar(codigo: string): Promise<void> {
