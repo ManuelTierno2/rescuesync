@@ -191,7 +191,8 @@ export function StackedColumns({ data, series, height = 240, unit }: {
                   const h = (v / max) * plotH;
                   const top = k === visible.length - 1;
                   const gap = k > 0 ? GAP : 0;
-                  const segH = Math.max(0, h - gap);
+                  // Altura mínima para que una serie chica (p. ej. 30 personas junto a miles de litros) no desaparezca.
+                  const segH = Math.max(3, h - gap);
                   const x0 = cx - barW / 2;
                   const y0 = base - gap - segH;
                   base = y0;
@@ -221,7 +222,9 @@ export function StackedColumns({ data, series, height = 240, unit }: {
           {series.map((s, k) => (
             <span key={s.name}><i className="swatch" style={{ background: s.color }} />{s.name}: {formatNumber(data[active]!.values[k] ?? 0)}</span>
           ))}
-          <span className="muted">Total: {formatNumber(totals[active]!)} {unit}</span>
+          {series.length > 1
+            ? <span className="muted">Total: {formatNumber(totals[active]!)} {unit}</span>
+            : <span className="muted">{unit}</span>}
         </div>
       )}
     </div>

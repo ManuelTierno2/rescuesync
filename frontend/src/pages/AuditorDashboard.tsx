@@ -146,17 +146,19 @@ export function AuditorDashboard() {
           </div>
 
           <div className="chart-grid">
-            <ChartCard title="Suministros movilizados por mes" subtitle="Cantidad adjudicada según el mes de adjudicación, por tipo de lote."
+            <ChartCard title="Suministros movilizados por mes" subtitle="Cantidad adjudicada según el mes de adjudicación. Personal y recursos van por separado, cada uno con su escala."
               rows={d.suministrosPorMes} filename={`suministros-por-mes_${sufijo}`}
               columns={[
                 { label: 'Mes', value: r => r.mes, format: r => etiquetaMes(r.mes) },
                 { label: 'Personal', value: r => r.personal, numeric: true },
                 { label: 'Recursos', value: r => r.recurso, numeric: true },
-                { label: 'Total', value: r => r.personal + r.recurso, numeric: true },
               ]}>
-              <StackedColumns unit="unidades"
-                series={[{ name: 'Personal', color: SERIES[0] }, { name: 'Recursos', color: SERIES[1] }]}
-                data={d.suministrosPorMes.map(m => ({ label: etiquetaMes(m.mes), values: [m.personal, m.recurso] }))} />
+              <StackedColumns unit="personas" height={150}
+                series={[{ name: 'Personal', color: SERIES[0] }]}
+                data={d.suministrosPorMes.map(m => ({ label: etiquetaMes(m.mes), values: [m.personal] }))} />
+              <StackedColumns unit="unidades" height={150}
+                series={[{ name: 'Recursos', color: SERIES[1] }]}
+                data={d.suministrosPorMes.map(m => ({ label: etiquetaMes(m.mes), values: [m.recurso] }))} />
             </ChartCard>
 
             <ChartCard title="Estado de los proyectos" subtitle="Etapa actual de cada emergencia del período."

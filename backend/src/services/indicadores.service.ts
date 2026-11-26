@@ -32,8 +32,10 @@ export const ETAPAS_BONITA = [
   'Generar y publicar lotes',
   'Cargar o editar ofertas',
   'Evaluar curso alternativo',
+  'Seleccionar y adjudicar ofertas',
   'Monitorear despliegue',
   'Marcar actividad finalizada',
+  'Cerrar operativo',
 ];
 
 /** Máximo de casos que se consultan a Bonita por pedido (los más recientes del filtro). */
